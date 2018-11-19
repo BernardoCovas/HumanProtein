@@ -34,8 +34,8 @@ class PathsJson:
     PATHS_JSON_FNAME = "PATHS.json"
     EXAMPLE_PATHS_JSON = {
         "RAW_DATA_DIR": "./.data/",
-        "TRAIN_DATA_CLEAN_PATH": "./.data/processed/train.csv",
-        "TEST_DATA_CLEAN_PATH": "./.data/processed/test.csv",
+        "TRAIN_DATA_CLEAN_PATH": "./.data/processed/train.record",
+        "TEST_DATA_CLEAN_PATH": "./.data/processed/test.record",
         "MODEL_CHECKPOINT_DIR": "./models/",
         "LOGS_DIR": "./logs/",
         "SUBMISSION_DIR": "./submissions/"
