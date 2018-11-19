@@ -29,6 +29,42 @@ PROTEIN_LABEL = {
     "27": "Rods & rings"
 }
 
+class ConfigurationJson:
+
+    CONFIG_FNAME = "configuration.json"
+    EXAMPEL_CONFIG = {
+        "TF_HUB_MODULE": "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1"
+    }
+
+    _config_data = {}
+
+    def __init__(self):
+        
+        import os
+        import logging
+        import json
+
+        self._logger = logging.getLogger("ConfigJsonClass")
+
+        if not os.path.exists(self.CONFIG_FNAME):
+
+            self._logger.error(f"""
+No {self.CONFIG_FNAME} available.
+One will be created, please specify the locations for your config.
+""")
+
+            with open(self.CONFIG_FNAME, "w") as json_file:
+                json.dump(self.EXAMPEL_CONFIG, json_file, indent=2)
+
+            raise FileNotFoundError(f"No {self.CONFIG_FNAME} found.")
+
+        with open(self.CONFIG_FNAME) as json_file:
+            self._config_data = json.load(json_file)
+
+    @property
+    def tf_hub_module(self):
+        return self._config_data.get("TF_HUB_MODULE")
+
 class PathsJson:
 
     PATHS_JSON_FNAME = "PATHS.json"
