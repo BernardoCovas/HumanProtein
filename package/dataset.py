@@ -21,7 +21,8 @@ class Dataset:
     # NOTE (bcovas) Almost for sure we do not need the yellow filter.
 
     dataset_path = ".data"
-    
+    _img_ids = []
+
     _all_zip = "all.zip"
     _train_zip = "train.zip"
     _test_zip = "test.zip"
@@ -42,6 +43,16 @@ class Dataset:
     @property
     def test_dir(self):
         return self._raw_path(self._test_dir)
+
+    @property
+    def ids(self):
+
+        n_imgs = len(self._img_ids)
+        if n_imgs == 0:
+            raise IndexError(
+                "Dataset not prepared. Don't forget to call self.prepare().")
+
+        return self._img_ids
 
     def prepare(self):
 
@@ -109,3 +120,11 @@ class Dataset:
                     imglist.append(_id + f"_{img_filter}" + ".png")
 
         return sorted(imglist) == sorted(existing_imglist)
+
+# TENSORFLOW FUNCTIONS
+
+def tf_write_single_example():
+    pass
+
+def tf_parse_single_example():
+    pass
