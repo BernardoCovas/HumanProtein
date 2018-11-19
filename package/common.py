@@ -29,9 +29,6 @@ PROTEIN_LABEL = {
     "27": "Rods & rings"
 }
 
-TF_HUB_MODULE = "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1"
-
-
 class PathsJson:
 
     PATHS_JSON_FNAME = "PATHS.json"
