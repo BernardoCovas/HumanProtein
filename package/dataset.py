@@ -2,9 +2,13 @@ import os
 import shutil
 import logging
 import threading
+import json
 import zipfile
 
 import wget
+import tensorflow as tf
+
+from . import common
 
 class Dataset:
     """
@@ -12,6 +16,7 @@ class Dataset:
     from the competition website and place it in `dataset_path`.
     Calling `self.prepare()` will extract the dataset if not
     already extracted.
+    For configuration, use the provided `PATHS.json`.
 
     `https://www.kaggle.com/c/human-protein-atlas-image-classification`
     """
@@ -21,7 +26,7 @@ class Dataset:
     # NOTE (bcovas) Almost for sure we do not need the yellow filter.
 
     dataset_path = ".data"
-    _img_ids = []
+    _train_img_ids = {}
 
     _all_zip = "all.zip"
     _train_zip = "train.zip"
@@ -33,8 +38,9 @@ class Dataset:
 
     _all_contents = [_train_dir, _test_dir, _csv_file, _csv_sample]
 
-    def __init__(self, dataset_path="./.data"):
-        self.dataset_path = dataset_path
+    def __init__(self):
+        config = common.PathsJson()
+        self.dataset_path = config.RAW_DATA_DIR
 
     @property
     def train_dir(self):
@@ -45,14 +51,36 @@ class Dataset:
         return self._raw_path(self._test_dir)
 
     @property
-    def ids(self):
+    def train_ids(self):
 
-        n_imgs = len(self._img_ids)
+        n_imgs = len(self._train_img_ids.keys())
         if n_imgs == 0:
             raise IndexError(
                 "Dataset not prepared. Don't forget to call self.prepare().")
 
-        return self._img_ids
+        return self._train_img_ids
+
+    def get_id_paths(self, img_id: str):
+
+        if img_id not in self._train_img_ids.keys():
+            raise IndexError("Not a valid id: " + img_id)
+
+        data = {}
+        for color_filter in self._filter_list:
+
+            img_name = f"{img_id}_{color_filter}.png"
+            img_name = os.path.join(self.dataset_path, self._train_dir, img_name)
+
+            if not os.path.exists(img_name):
+                raise FileNotFoundError(f"id {img_id} exists, but it's " + \
+                    f"{color_filter} filter does not seem to exist.")
+
+            data[color_filter] = img_name
+
+        data["labels"] = self._train_img_ids.get(img_id)
+        self._logger.debug("Found: " + img_id)
+
+        return data
 
     def prepare(self):
 
@@ -115,7 +143,10 @@ class Dataset:
         with open(self._raw_path(self._csv_file)) as f:
             reader = csv.DictReader(f)
             for row in reader:
+                
                 _id = row.get("Id")
+                self._train_img_ids[_id] = row.get("Target").split(" ")
+
                 for img_filter in self._filter_list:
                     imglist.append(_id + f"_{img_filter}" + ".png")
 
@@ -123,8 +154,37 @@ class Dataset:
 
 # TENSORFLOW FUNCTIONS
 
-def tf_write_single_example():
-    pass
+class TFRecordKeys:
 
-def tf_parse_single_example():
-    pass
+    LABEL_KEY = "image/labels"
+    ENCODED_KEY = "image/encoded"
+    ID_KEY = "image/id"
+
+def _int64_feature(value_list):
+  return tf.train.Feature(int64_list=tf.train.Int64List(value=value_list))
+
+def _bytes_feature(value):
+  return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+def tf_write_single_example(image: bytes, labels: [], img_id: str):
+
+    if type(img_id) == str:
+        img_id = img_id.encode()
+
+    feature = {TFRecordKeys.LABEL_KEY: _int64_feature(labels),
+               TFRecordKeys.ENCODED_KEY: _bytes_feature(image),
+               TFRecordKeys.ID_KEY: _bytes_feature(img_id)}
+
+    example = tf.train.Example(features=tf.train.Features(feature=feature))
+    return example.SerializeToString()
+
+def tf_parse_single_example(serialized_example: bytes):
+
+    feature = {TFRecordKeys.LABEL_KEY: tf.FixedLenSequenceFeature([], tf.int64
+                    , allow_missing=True),
+               TFRecordKeys.ENCODED_KEY: tf.FixedLenFeature([], tf.string),
+               TFRecordKeys.ID_KEY: tf.FixedLenFeature([], tf.string)}
+
+    features = tf.parse_single_example(serialized_example, features=feature)
+
+    return features
