@@ -134,7 +134,7 @@ def single_consumer(example_queue: queue.Queue, paralell_calls: int, use_gpu: bo
                 label = label[label >= 0]
 
                 example_queue.put(
-                    (images_bytes[i], features[i], labels[i], img_ids[i]))
+                    (images_bytes[i], features[i], label, img_ids[i]))
 
 
 def write(example_queue: queue.Queue, tfrecord_fname: str):
