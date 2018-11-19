@@ -7,6 +7,7 @@ import zipfile
 
 import wget
 import tensorflow as tf
+import numpy as np
 
 from . import common
 
@@ -159,31 +160,39 @@ class TFRecordKeys:
     LABEL_KEY = "image/labels"
     ENCODED_KEY = "image/encoded"
     ID_KEY = "image/id"
+    IMG_FEATURES = "image/features"
 
 def _int64_feature(value_list):
   return tf.train.Feature(int64_list=tf.train.Int64List(value=value_list))
 
+def _float_feature(value):
+    return tf.train.Feature(float_list=tf.train.FloatList(value=value))
+
 def _bytes_feature(value):
   return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
-def tf_write_single_example(image: bytes, labels: [], img_id: str):
+def tf_write_single_example(image: bytes, img_features: np.ndarray, labels: [], img_id: str):
 
     if type(img_id) == str:
         img_id = img_id.encode()
 
     feature = {TFRecordKeys.LABEL_KEY: _int64_feature(labels),
                TFRecordKeys.ENCODED_KEY: _bytes_feature(image),
-               TFRecordKeys.ID_KEY: _bytes_feature(img_id)}
+               TFRecordKeys.ID_KEY: _bytes_feature(img_id),
+               TFRecordKeys.IMG_FEATURES: _float_feature(img_features)}
 
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example.SerializeToString()
 
 def tf_parse_single_example(serialized_example: bytes):
 
-    feature = {TFRecordKeys.LABEL_KEY: tf.FixedLenSequenceFeature([], tf.int64
-                    , allow_missing=True),
+    feature = {TFRecordKeys.LABEL_KEY: tf.FixedLenSequenceFeature([], tf.int64,
+                    allow_missing=True),
                TFRecordKeys.ENCODED_KEY: tf.FixedLenFeature([], tf.string),
-               TFRecordKeys.ID_KEY: tf.FixedLenFeature([], tf.string)}
+               TFRecordKeys.ID_KEY: tf.FixedLenFeature([], tf.string),
+               TFRecordKeys.IMG_FEATURES: tf.FixedLenSequenceFeature([], tf.float32,
+                    allow_missing=True)
+            }
 
     features = tf.parse_single_example(serialized_example, features=feature)
 
