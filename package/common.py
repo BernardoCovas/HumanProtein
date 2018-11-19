@@ -28,3 +28,60 @@ PROTEIN_LABEL = {
     "26": "Cytoplasmic bodies",
     "27": "Rods & rings"
 }
+
+TF_HUB_MODULE = "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1"
+
+
+class PathsJson:
+
+    PATHS_JSON_FNAME = "PATHS.json"
+    EXAMPLE_PATHS_JSON = {
+        "RAW_DATA_DIR": "./.data/",
+        "TRAIN_DATA_CLEAN_PATH": "./.data/processed/train.csv",
+        "TEST_DATA_CLEAN_PATH": "./.data/processed/test.csv",
+        "MODEL_CHECKPOINT_DIR": "./models/",
+        "LOGS_DIR": "./logs/",
+        "SUBMISSION_DIR": "./submissions/"
+    }
+
+    _path_config = {}
+
+    def __init__(self):
+
+        import os
+        import logging
+        import json
+
+        self._logger = logging.getLogger("PathsJsonClass")
+        
+        if not os.path.exists(self.PATHS_JSON_FNAME):
+        
+            self._logger.error("""No PATHS.json available.
+                One will be created, please specify the locations for your config.""")
+            
+            with open(self.PATHS_JSON_FNAME, "w") as json_file:
+                json.dump(self.EXAMPLE_PATHS_JSON, json_file, indent=2)
+
+            raise FileNotFoundError("No PATHS.json found.")
+
+        with open(self.PATHS_JSON_FNAME) as json_file:
+            self._path_config = json.load(json_file)
+
+    @property
+    def RAW_DATA_DIR(self):
+        return self._path_config.get("RAW_DATA_DIR")
+    @property
+    def TRAIN_DATA_CLEAN_PATH(self):
+        return self._path_config.get("TRAIN_DATA_CLEAN_PATH")
+    @property
+    def TEST_DATA_CLEAN_PATH(self):
+        return self._path_config.get("TEST_DATA_CLEAN_PATH")
+    @property
+    def MODEL_CHECKPOINT_DIR(self):
+        return self._path_config.get("MODEL_CHECKPOINT_DIR")
+    @property
+    def RAW_DATLOGS_DIRA_DIR(self):
+        return self._path_config.get("LOGS_DIR")
+    @property
+    def SUBMISSION_DIR(self):
+        return self._path_config.get("SUBMISSION_DIR")
