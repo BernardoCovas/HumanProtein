@@ -1,3 +1,0 @@
-[submodule "package/models"]
-	path = package/models
-	url = https://github.com/tensorflow/models.git
