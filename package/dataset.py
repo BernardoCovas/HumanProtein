@@ -17,41 +17,65 @@ class Dataset:
     """
 
     _logger = logging.getLogger("dataset_class")
+    _filter_list = ["red", "green", "blue", "yellow"]
+    # NOTE (bcovas) Almost for sure we do not need the yellow filter.
+
     dataset_path = ".data"
-    raw_zip_name = "all.zip"
-    raw_zip_subfiles = ["test.zip", "train.zip"]
+    
+    _all_zip = "all.zip"
+    _train_zip = "train.zip"
+    _test_zip = "test.zip"
+    _csv_file = "train.csv"
+    _csv_sample = "sample_submission.csv"
+    _train_dir ="train"
+    _test_dir = "test"
+
+    _all_contents = [_train_dir, _test_dir, _csv_file, _csv_sample]
 
     def __init__(self, dataset_path="./.data"):
         self.dataset_path = dataset_path
 
     @property
-    def raw_filename(self):
-        return os.path.join(self.dataset_path, self.raw_zip_name)
-
-    @property
     def train_dir(self):
-        return os.path.join(self.dataset_path, "train")
+        return self._raw_path(self._train_dir)
 
     @property
     def test_dir(self):
-        return os.path.join(self.dataset_path, "test")
-
+        return self._raw_path(self._test_dir)
 
     def prepare(self):
 
-        self._extract(self.raw_filename)
+        if self._prepared():
+            self._logger.info("Already extracted. Skipping.")
+            return
+
+        _train_zip = self._raw_path(self._train_zip)
+        _test_zip = self._raw_path(self._test_zip)
+
+        self._extract(self._raw_path(self._all_zip), self.dataset_path)
 
         ts = []
-        for filename in self.raw_zip_subfiles:
-
-            t = threading.Thread(target=lambda: self._extract(os.path.join(self.dataset_path, filename)))
+        for f, d in list(zip([_train_zip, _test_zip], [self.train_dir, self.test_dir])):
+            t = threading.Thread(target=self._extract, args=(f, d))
             ts.append(t)
             t.start()
 
         for t in ts:
             t.join()
 
-    def _extract(self, filename: str):
+        for f in [_train_zip, _test_zip]:
+            self._logger.info(f"Deleting: {f}")
+            try:
+                os.remove(f)
+            except FileNotFoundError:
+                pass
+
+        self._logger.info("Done.")
+
+    def _raw_path(self, file: str):
+        return os.path.join(self.dataset_path, file)
+
+    def _extract(self, filename: str, dirname=None):
 
         if not os.path.exists(filename):
             raise FileNotFoundError(filename)
@@ -59,34 +83,29 @@ class Dataset:
         self._logger.info(f"Extracting {filename}...")
         zip_file = zipfile.ZipFile(filename)
 
-        dir_name = ""
-        filelist = []
-        zipfiles = []
-
-        if filename == self.raw_filename:
-
-            dir_name = self.dataset_path
-            filelist = os.listdir(self.dataset_path)
-            filelist.remove(self.raw_zip_name)
-            zipfiles = zip_file.namelist()
-
-        else:
-
-            dir_name = filename.replace(".zip", "")
-            filelist = os.listdir(dir_name) if os.path.exists(dir_name) else []
-            zipfiles = zip_file.namelist()
-
-
-        # NOTE (bcovas) We check if all the fles inside the
-        # zip are extracted. If so, we skip.
-        if set(sorted(zipfiles)) < set(sorted(filelist)):
-            self._logger.info("Already extracted. Skipping...")
-            return
-
-        if os.path.exists(dir_name) and dir_name is not self.dataset_path:
-            shutil.rmtree(dir_name)
-
-        zip_file.extractall(dir_name)
+        zip_file.extractall(dirname)
         zip_file.close()
 
         self._logger.info(f"Done: {filename}")
+
+    def _prepared(self):
+        
+        import csv
+
+        for _file in self._all_contents:
+
+            _file = self._raw_path(_file)
+            if not os.path.exists(_file):
+                return False
+
+        existing_imglist = os.listdir(self.train_dir)
+        imglist = []
+
+        with open(self._raw_path(self._csv_file)) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                _id = row.get("Id")
+                for img_filter in self._filter_list:
+                    imglist.append(_id + f"_{img_filter}" + ".png")
+
+        return sorted(imglist) == sorted(existing_imglist)
