@@ -1,12 +1,13 @@
 import tensorflow as tf
 import tensorflow_hub as tf_hub
 
+from .common import ConfigurationJson
+
 class Model:
 
-    TF_HUB_MODULE = "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1"
-
     def __init__(self):
-        self._module = tf_hub.Module(self.TF_HUB_MODULE)
+        self.config = ConfigurationJson()
+        self._module = tf_hub.Module(self.config.tf_hub_module)
 
     def predict(self, image: []):
         pass
