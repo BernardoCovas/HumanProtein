@@ -1,4 +1,7 @@
 *.pyc
 *.pyo
 
+.vscode
+.vs
+
 .data
