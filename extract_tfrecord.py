@@ -26,7 +26,11 @@ def main():
 
         features = dataset.make_one_shot_iterator().get_next()
 
-        image_tensor = features[dataset_module.TFRecordKeys.ENCODED_KEY]
+        # img_features_tensor = features[dataset_module.TFRecordKeys.IMG_FEATURES]
+        image_bytes_tensor = features[dataset_module.TFRecordKeys.ENCODED_KEY]
+        img_tensor = tf.image.decode_image(image_bytes_tensor)
+        shape_tensor = tf.shape(img_tensor)
+
         img_id_tensor = features[dataset_module.TFRecordKeys.ID_KEY]
         img_label_tensor = features[dataset_module.TFRecordKeys.LABEL_KEY]
 
@@ -34,15 +38,17 @@ def main():
             "(" + tf.strings.reduce_join(
                 tf.as_string(img_label_tensor), separator="_") + ").png"
         
-        write_file = tf.write_file(out_path_tensor, image_tensor)
+        write_file = tf.write_file(out_path_tensor, image_bytes_tensor)
 
         sess = tf.Session()
         while True:
             try:
-                _, img_id = sess.run([write_file, img_id_tensor])
-                print("Wrote: " + img_id.decode())
+                _, img_id, shape, labels = sess.run([write_file, img_id_tensor, shape_tensor, img_label_tensor])
+                print("Wrote: " + img_id.decode() + " of shape: " + str(shape) + " and labels: " + str(labels))
+
             except tf.errors.OutOfRangeError:
+                print("Done.")
                 break
 
 if __name__ == "__main__":
-    main()  
+    main()
