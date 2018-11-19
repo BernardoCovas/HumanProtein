@@ -162,8 +162,17 @@ def write(example_queue: queue.Queue, tfrecord_fname: str):
 def main(args):
 
     logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("parse_data")
 
     tfrecord_fname = PathsJson().TRAIN_DATA_CLEAN_PATH
+
+    if os.path.exists(tfrecord_fname):
+
+        if not args.overwrite:
+            logger.error(f"{tfrecord_fname} exists. Use the flag '-h' for help.")
+            exit()
+        else:
+            logger.warning(f"Overwriting {tfrecord_fname}.")
 
     dirname = os.path.dirname(tfrecord_fname)
 
@@ -204,6 +213,9 @@ The number of paralell calls to use for cpu map functions. Defaults to 'None' (M
     parser.add_argument("--batch_size", type=int, default=50, help="""
 The number of images that go through the deep learing model at once. 
 Large numbers can improve performance. Defaults to 50.
+""")
+    parser.add_argument("--overwrite", action="store_true", help="""
+Overwrite an existing tfrecord.
 """)
 
     args = parser.parse_args()
