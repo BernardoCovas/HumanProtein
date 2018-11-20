@@ -1,29 +1,60 @@
 import tensorflow as tf
 import tensorflow_hub as tf_hub
 
-from .common import ConfigurationJson
+from .common import ConfigurationJson, PathsJson, PROTEIN_LABEL
 
-class Model:
+class FeatureExractor:
 
     def __init__(self):
+
+        self.paths = PathsJson()
         self.config = ConfigurationJson()
+
         self._module = tf_hub.Module(self.config.tf_hub_module)
 
-    def predict(self, image: []):
-        pass
+    def predict(self, image_tensor: tf.Tensor):
+        """
+        `image_tensor`: A preprocessed float32 4D tensor in [0, 1].
+        """
+        return self._module(image_tensor)
 
-    def preprocess(self, images_tensor: tf.Tensor, normalize=True):
+    def preprocess(self, image_tensor: tf.Tensor):
 
         height, width = tf_hub.get_expected_image_size(self._module)
 
         # NOTE (bcovas) image_tensor is a 4D tensor [batch, height, widt, channels]
-        images_tensor = tf.image.resize_bilinear(images_tensor, [height, width])
+        image_tensor = tf.image.resize_bilinear(
+            image_tensor, [height, width])
 
-        if normalize:
-            images_tensor = images_tensor / 255
-        
-        return images_tensor
+        return image_tensor / 255
 
-    def extract_features(self, images_tensor: tf.Tensor, normalize=True):
-        features = self._module(images_tensor)
-        return features
+class ClassifierModel:
+
+    def predict(self, feature_tensor: tf.Tensor):
+        return self._model_fn(feature_tensor, None, False)
+
+    def predict_train(self, feature_tensor: tf.Tensor, label_tensor: tf.Tensor):
+        return self._model_fn(feature_tensor, label_tensor, True)
+
+    def _model_fn(
+            self,
+            feature_tensor: tf.Tensor,
+            label_tensor: tf.Tensor,
+            is_training=False
+        ):
+
+        if is_training and label_tensor is None:
+            return ValueError("Model is set to training but no labels were supplied.")
+
+        net = tf.layers.dense(feature_tensor, 1024, tf.nn.relu)
+        net = tf.layers.dense(feature_tensor, 512, tf.nn.relu)
+        net = tf.layers.dense(feature_tensor, 256, tf.nn.relu)
+        net = tf.layers.dense(feature_tensor, 128, tf.nn.relu)
+        net = tf.layers.dense(
+            feature_tensor, len(PROTEIN_LABEL.keys()), None)
+
+        if not is_training:
+            return net
+
+        loss = tf.losses.sigmoid_cross_entropy(label_tensor, net)
+        return net, loss
