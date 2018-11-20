@@ -12,6 +12,8 @@ PATHS.json
 CONFIGURATION.json
 
 # TF MODEL DATA
+**/checkpoint
 **/*.index
+**/.meta
 **/*.pb
 **/*.data-*
