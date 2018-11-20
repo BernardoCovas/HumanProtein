@@ -30,6 +30,9 @@ class FeatureExractor:
 
 class ClassifierModel:
 
+    _input = None
+    _output = None
+
     def predict(self, feature_tensor: tf.Tensor):
         return self._model_fn(feature_tensor, None, False)
 
@@ -46,6 +49,8 @@ class ClassifierModel:
         if is_training and label_tensor is None:
             return ValueError("Model is set to training but no labels were supplied.")
 
+        self._input = feature_tensor
+
         net = tf.layers.dense(feature_tensor, 1024, tf.nn.relu)
         net = tf.layers.dense(feature_tensor, 512, tf.nn.relu)
         net = tf.layers.dense(feature_tensor, 256, tf.nn.relu)
@@ -53,8 +58,18 @@ class ClassifierModel:
         net = tf.layers.dense(
             feature_tensor, len(PROTEIN_LABEL.keys()), None)
 
+        self._output = net
+
         if not is_training:
             return net
 
         loss = tf.losses.sigmoid_cross_entropy(label_tensor, net)
         return net, loss
+
+    @property
+    def input_tensor(self):
+        return self._input
+
+    @property
+    def output_tensor(self):
+        return self._output
