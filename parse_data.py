@@ -106,7 +106,7 @@ def single_consumer(example_queue: queue.Queue, paralell_calls: int, use_gpu: bo
         label_dataset = label_dataset.batch(batch_size)
         id_dataset = id_dataset.batch(batch_size)
 
-        processed_img_dataset = img_dataset.map(tf_model.preprocess)
+        processed_img_dataset = img_dataset.map(tf_model.preprocess, paralell_calls)
 
         if use_gpu:
             processed_img_dataset = processed_img_dataset.apply(
