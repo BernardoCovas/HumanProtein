@@ -188,12 +188,13 @@ def tf_write_single_example(image: bytes, img_features: np.ndarray, labels: [], 
 
 def tf_parse_single_example(serialized_example: bytes, load_images=False):
 
-    feature = {TFRecordKeys.LABEL_KEY: tf.FixedLenSequenceFeature([], tf.int64,
-                    allow_missing=True),
-               TFRecordKeys.ID_KEY: tf.FixedLenFeature([], tf.string),
-               TFRecordKeys.IMG_FEATURES: tf.FixedLenSequenceFeature([], tf.float32,
-                    allow_missing=True)
-            }
+    feature = {
+        TFRecordKeys.ID_KEY: tf.FixedLenFeature([], tf.string),
+        TFRecordKeys.LABEL_KEY: tf.FixedLenSequenceFeature([], tf.int64,
+            allow_missing=True),
+        TFRecordKeys.IMG_FEATURES: tf.FixedLenSequenceFeature([], tf.float32,
+            allow_missing=True)
+    }
 
     if load_images:
         feature[TFRecordKeys.ENCODED_KEY] = tf.FixedLenFeature([], tf.string)
