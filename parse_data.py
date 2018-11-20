@@ -25,8 +25,8 @@ import tensorflow_hub as tf_hub
 import numpy as np
 
 from package.dataset import Dataset, tf_write_single_example
-from package.common import PathsJson
-from package.model import Model
+from package.common import PathsJson, PROTEIN_LABEL
+from package.model import FeatureExractor
 
 raw_dataset = Dataset()
 raw_dataset.prepare()
@@ -38,10 +38,15 @@ def fname_loader():
     for img_id in raw_dataset.train_ids:
 
         img_data = raw_dataset.get_id_paths(img_id)
-        yield img_data["red"], img_data["green"], img_data["blue"], img_data["labels"], img_id
 
+        one_hot = np.zeros([len(PROTEIN_LABEL.keys())])
+        
+        for label in img_data["labels"]:
+            one_hot[int(label)] = 1
 
-def single_consumer(example_queue: queue.Queue, paralell_calls: int, use_gpu: bool, batch_size=50):
+        yield img_data["red"], img_data["green"], img_data["blue"], one_hot, img_id
+
+def single_consumer(example_queue: queue.Queue, paralell_calls: int, use_gpu: bool, batch_size=50, save_image=False):
 
     if paralell_calls is None:
         paralell_calls = os.cpu_count()
@@ -50,13 +55,15 @@ def single_consumer(example_queue: queue.Queue, paralell_calls: int, use_gpu: bo
     logger = logging.getLogger("image_parser")
     logger.info(f"Using {paralell_calls} parallel calls.")
 
-    msg = ""
     if use_gpu:
-        msg = "Using GPU."
+        logger.info("Using GPU.")
     else:
-        msg = "Not using GPU. Add the '-h' argument for available options."
+        logger.warn("Not using GPU. Add the '-h' argument for available options.")
 
-    logger.info(msg)
+    if save_image:
+        logger.warning("Saving images. This is not required for training and has a huge impact in performance.")
+    else:
+        logger.info("Not saving images. Not required.")
 
     def map_fn(r, g, b, lb, img_id):
 
@@ -81,36 +88,37 @@ def single_consumer(example_queue: queue.Queue, paralell_calls: int, use_gpu: bo
     tf_graph = tf.Graph()
     with tf_graph.as_default():
 
-        tf_model = Model()
+        tf_model = FeatureExractor()
 
-        dataset = tf.data.Dataset.from_generator(fname_loader,
-                                                 (tf.string, tf.string,
-                                                  tf.string, tf.int32, tf.string),
-                                                 (None, None, None, None, None))
+        dataset = tf.data.Dataset.from_generator(
+            fname_loader,
+            (tf.string, tf.string,
+            tf.string, tf.int32, tf.string),
+            (None, None, None, None, None))
 
         dataset = dataset.map(map_fn, paralell_calls)
 
-        img_dataset = dataset.map(lambda x, y, z: x)
+        img_dataset   = dataset.map(lambda x, y, z: x)
         label_dataset = dataset.map(lambda x, y, z: y)
-        id_dataset = dataset.map(lambda x, y, z: z)
+        id_dataset    = dataset.map(lambda x, y, z: z)
 
         img_dataset = img_dataset.batch(batch_size)
+        label_dataset = label_dataset.batch(batch_size)
+        id_dataset = id_dataset.batch(batch_size)
+
         processed_img_dataset = img_dataset.map(tf_model.preprocess)
 
         if use_gpu:
             processed_img_dataset = processed_img_dataset.apply(
                 tf.data.experimental.prefetch_to_device("/gpu:0"))
 
-        label_dataset = label_dataset.padded_batch(
-            batch_size, [tf.Dimension(None)], -1)
-        id_dataset = id_dataset.batch(batch_size)
-
         processed_imgs_tensor = processed_img_dataset.make_one_shot_iterator().get_next()
+
         imgs_tensor = img_dataset.make_one_shot_iterator().get_next()
         labels_tensor = label_dataset.make_one_shot_iterator().get_next()
         img_ids_tensor = id_dataset.make_one_shot_iterator().get_next()
 
-        features_tensor = tf_model.extract_features(processed_imgs_tensor)
+        features_tensor = tf_model.predict(processed_imgs_tensor)
 
         imgs_tensor = tf.map_fn(lambda x: tf.image.encode_png(
             x), imgs_tensor, dtype=tf.string)
@@ -123,19 +131,26 @@ def single_consumer(example_queue: queue.Queue, paralell_calls: int, use_gpu: bo
         while True:
 
             try:
-                images_bytes, features, labels, img_ids = sess.run(
-                    [imgs_tensor, features_tensor, labels_tensor, img_ids_tensor])
+                calls =  [features_tensor, labels_tensor, img_ids_tensor]
+
+                if save_image:
+                    calls.append(imgs_tensor)
+                result = sess.run(calls)
+                
+                images_bytes = features = labels = img_ids = None
+                if save_image:
+                    features, labels, img_ids, images_bytes = result
+                else:
+                    features, labels, img_ids = result
+
             except tf.errors.OutOfRangeError:
                 break
 
             for i in range(labels.shape[0]):
 
-                label = labels[i]
-                label = label[label >= 0]
-
                 example_queue.put(
-                    (images_bytes[i], features[i], label, img_ids[i]))
-
+                    (None if images_bytes is None else images_bytes[i],
+                    features[i], labels[i], img_ids[i]))
 
 def write(example_queue: queue.Queue, tfrecord_fname: str):
 
@@ -154,9 +169,10 @@ def write(example_queue: queue.Queue, tfrecord_fname: str):
 
             serialized_example = tf_write_single_example(
                 image_bytes, features, labels, img_id)
+
             writer.write(serialized_example)
 
-    logger.info("Wrote all %i examples." % (total_examples))
+    logger.info("Wrote %i examples." % (i))
 
 
 def main(args):
@@ -182,7 +198,7 @@ def main(args):
     example_queue = queue.Queue(100)
 
     producer = threading.Thread(target=single_consumer, args=(
-        example_queue, args.n_paralell_calls, args.gpu, args.batch_size))
+        example_queue, args.n_paralell_calls, args.gpu, args.batch_size, args.save_images))
     producer.start()
 
     writer = threading.Thread(
@@ -204,6 +220,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Parse the dataset for efficient training.")
 
+    parser.add_argument("--save_images", action="store_true", help="""
+Save the images to the tfrecord. They are not needed for training, and have a huge impact in performance. Defaults to 'False'.
+""")
     parser.add_argument("--gpu", action="store_true", help="""
 Use the gpu for improved performance. Depends on tensorflow-gpu.
 """)
