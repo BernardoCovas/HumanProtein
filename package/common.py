@@ -1,3 +1,5 @@
+import csv
+
 PROTEIN_LABEL = {
     "0": "Nucleoplasm",
     "1": "Nuclear membrane",
@@ -31,9 +33,11 @@ PROTEIN_LABEL = {
 
 class ConfigurationJson:
 
-    CONFIG_FNAME = "configuration.json"
+    CONFIG_FNAME = "CONFIGURATION.json"
     EXAMPEL_CONFIG = {
-        "TF_HUB_MODULE": "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1"
+        "TF_HUB_MODULE": "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1",
+        "BATCH_SIZE": "100",
+        "EPOCHS": "100000"
     }
 
     _config_data = {}
@@ -48,7 +52,8 @@ class ConfigurationJson:
 
         if not os.path.exists(self.CONFIG_FNAME):
 
-            self._logger.error(f"""
+            self._logger.error(
+f"""
 No {self.CONFIG_FNAME} available.
 One will be created, please specify the locations for your config.
 """)
@@ -64,6 +69,14 @@ One will be created, please specify the locations for your config.
     @property
     def tf_hub_module(self):
         return self._config_data.get("TF_HUB_MODULE")
+
+    @property
+    def batch_size(self):
+        return int(self._config_data.get("BATCH_SIZE"))
+
+    @property
+    def num_epochs(self):
+        return int(self._config_data.get("EPOCHS"))
 
 class PathsJson:
 
@@ -118,3 +131,8 @@ class PathsJson:
     @property
     def SUBMISSION_DIR(self):
         return self._path_config.get("SUBMISSION_DIR")
+
+class Submission:
+
+    def __init__(self):
+        self.paths = PathsJson()
