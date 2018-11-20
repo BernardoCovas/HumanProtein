@@ -23,7 +23,6 @@ def _model_fn(feature_dataset: tf.data.Dataset, label_dataset: tf.data.Dataset):
 def train(epochs: int, batch_size: int, prefetch: bool):
 
     logger = logging.getLogger("trainer")
-    config = ConfigurationJson()
     paths = PathsJson()
 
     logger.info(f"Using batch of {batch_size}")
