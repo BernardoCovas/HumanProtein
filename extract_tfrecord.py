@@ -22,11 +22,10 @@ def main():
     with graph.as_default():
 
         dataset = tf.data.TFRecordDataset(train_record)
-        dataset = dataset.map(dataset_module.tf_parse_single_example)
+        dataset = dataset.map(lambda x: dataset_module.tf_parse_single_example(x, True))
 
         features = dataset.make_one_shot_iterator().get_next()
 
-        # img_features_tensor = features[dataset_module.TFRecordKeys.IMG_FEATURES]
         image_bytes_tensor = features[dataset_module.TFRecordKeys.ENCODED_KEY]
         img_tensor = tf.image.decode_image(image_bytes_tensor)
         shape_tensor = tf.shape(img_tensor)
