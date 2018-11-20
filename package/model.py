@@ -10,7 +10,7 @@ class FeatureExractor:
         self.paths = PathsJson()
         self.config = ConfigurationJson()
 
-        self._module = tf_hub.Module(self.config.tf_hub_module)
+        self._module = tf_hub.Module(self.config.TF_HUB_MODULE)
 
     def predict(self, image_tensor: tf.Tensor):
         """
@@ -32,12 +32,17 @@ class ClassifierModel:
 
     _input = None
     _output = None
+    _scope = "ClassifierModel"
 
     def predict(self, feature_tensor: tf.Tensor):
         return self._model_fn(feature_tensor, None, False)
 
     def predict_train(self, feature_tensor: tf.Tensor, label_tensor: tf.Tensor):
         return self._model_fn(feature_tensor, label_tensor, True)
+
+    @property
+    def variable_scope(self):
+        return self._scope
 
     def _model_fn(
             self,
@@ -49,22 +54,37 @@ class ClassifierModel:
         if is_training and label_tensor is None:
             return ValueError("Model is set to training but no labels were supplied.")
 
-        self._input = feature_tensor
+        with tf.variable_scope(self._scope):
 
-        net = tf.layers.dense(feature_tensor, 1024, tf.nn.relu)
-        net = tf.layers.dense(feature_tensor, 512, tf.nn.relu)
-        net = tf.layers.dense(feature_tensor, 256, tf.nn.relu)
-        net = tf.layers.dense(feature_tensor, 128, tf.nn.relu)
-        net = tf.layers.dense(
-            feature_tensor, len(PROTEIN_LABEL.keys()), None)
+            self._input = feature_tensor
 
-        self._output = net
+            net = tf.layers.dense(feature_tensor, 512, tf.nn.relu)
+            net = tf.layers.dense(feature_tensor, 256, tf.nn.relu)
+            net = tf.layers.dense(feature_tensor, 128, tf.nn.relu)
+            net = tf.layers.dense(
+                feature_tensor, len(PROTEIN_LABEL.keys()), None)
 
-        if not is_training:
-            return net
+            self._output = net
 
-        loss = tf.losses.sigmoid_cross_entropy(label_tensor, net)
+            if not is_training:
+                return net
+
+            loss = tf.losses.sigmoid_cross_entropy(label_tensor, net)
+            
         return net, loss
+
+    def load(self, sess: tf.Session):
+        """
+        Loads the saved_model variables. Returns the graph def.
+        Run this AFTER the first predict, and AFTER tf.global_variables_initializer().
+        (Or any other initializer that might overwrite the model variables)
+        """
+
+        paths = PathsJson()
+        var_list = tf.trainable_variables(scope=self.variable_scope)
+        saver = tf.train.Saver(var_list=var_list)
+        saver.restore(sess, paths.MODEL_CHECKPOINT_DIR)
+
 
     @property
     def input_tensor(self):
