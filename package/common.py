@@ -1,4 +1,5 @@
 import csv
+import os
 
 PROTEIN_LABEL = {
     "0": "Nucleoplasm",
@@ -36,6 +37,7 @@ class ConfigurationJson:
     CONFIG_FNAME = "CONFIGURATION.json"
     EXAMPEL_CONFIG = {
         "TF_HUB_MODULE": "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1",
+        "EXPORTED_MODEL_DIR": "./Exported/",
         "BATCH_SIZE": "100",
         "EPOCHS": "100000"
     }
@@ -67,16 +69,20 @@ One will be created, please specify the locations for your config.
             self._config_data = json.load(json_file)
 
     @property
-    def tf_hub_module(self):
-        return self._config_data.get("TF_HUB_MODULE")
+    def TF_HUB_MODULE(self):
+        return str(self._config_data.get("TF_HUB_MODULE"))
 
     @property
-    def batch_size(self):
+    def BATCH_SIZE(self):
         return int(self._config_data.get("BATCH_SIZE"))
 
     @property
-    def num_epochs(self):
+    def EPOCHS(self):
         return int(self._config_data.get("EPOCHS"))
+    
+    @property
+    def EXPORTED_MODEL_DIR(self):
+        return str(self._config_data.get("EXPORTED_MODEL_DIR"))
 
 class PathsJson:
 
@@ -135,4 +141,5 @@ class PathsJson:
 class Submission:
 
     def __init__(self):
+
         self.paths = PathsJson()
