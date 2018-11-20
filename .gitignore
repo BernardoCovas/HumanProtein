@@ -1,9 +1,17 @@
+# PYTHON CACHE
 *.pyc
 *.pyo
 
+# IDE FOLDERS
 .vscode
 .vs
 
+# PATHS
 .data
 PATHS.json
 CONFIGURATION.json
+
+# TF MODEL DATA
+**/*.index
+**/*.pb
+**/*.data-*
