@@ -1,6 +1,7 @@
 # PYTHON CACHE
 *.pyc
 *.pyo
+*.csv
 
 # IDE FOLDERS
 .vscode
