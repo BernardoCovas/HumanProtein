@@ -1,6 +1,8 @@
 import csv
 import os
 
+import numpy as np
+
 PROTEIN_LABEL = {
     "0": "Nucleoplasm",
     "1": "Nuclear membrane",
@@ -38,6 +40,7 @@ class ConfigurationJson:
     EXAMPEL_CONFIG = {
         "TF_HUB_MODULE": "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1",
         "EXPORTED_MODEL_DIR": "./Exported/",
+        "OVERWRITE_DATASET_IF_CURRUPTED": False,
         "BATCH_SIZE": "100",
         "EPOCHS": "100000"
     }
@@ -83,6 +86,10 @@ One will be created, please specify the locations for your config.
     @property
     def EXPORTED_MODEL_DIR(self):
         return str(self._config_data.get("EXPORTED_MODEL_DIR"))
+
+    @property
+    def OVERWRITE_DATASET_IF_CURRUPTED(self):
+        return bool(self._config_data.get("OVERWRITE_DATASET_IF_CURRUPTED"))
 
 class PathsJson:
 
@@ -140,6 +147,42 @@ class PathsJson:
 
 class Submission:
 
-    def __init__(self):
+    HEADER = "Id,Predicted"
 
+    def __init__(self, submission_name: str):
         self.paths = PathsJson()
+        self.submission_file = open(
+            os.path.join(self.paths.SUBMISSION_DIR, submission_name + ".csv"),"w")
+
+        self.submission_file.write(self.HEADER + "\n")
+
+    def add_submission(self, img_id: str, labels: list):
+
+        labels_text = " ".join(labels)
+        self.submission_file.write(",".join([img_id, labels_text]) + "\n")
+
+    def end_sumbission(self):
+        self.submission_file.close()
+
+# UTILS
+
+def one_hot_to_label(one_hot_list: np.ndarray):
+    labels = []
+
+    for vector in one_hot_list:
+        indexes = vector.nonzero()[0]
+
+        # FIXME (bcovas) temp fix for now.
+        if indexes.shape[0] == 0:
+            indexes = np.array([np.argmax(vector)])
+
+        labels.append(
+            list(map(str, indexes.tolist())))
+
+    return labels
+
+def strip_fname_for_id(fname: str):
+
+    fname = os.path.basename(fname)
+    img_id = fname.split("_")[0]
+    return img_id
