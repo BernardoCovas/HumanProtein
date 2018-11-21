@@ -34,6 +34,7 @@ PROTEIN_LABEL = {
     "27": "Rods & rings"
 }
 
+
 class TFHubModel:
 
     @property
@@ -76,32 +77,28 @@ class InceptionV3(TFHubModel):
     def url(self):
         return "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1"
 
+TFHUB_MODELS = {
+    "PNASNet": PNASNet,
+    "InceptionV3": InceptionV3
+}
 
-class TFHubModels:
+def TFHubModels(model_name) -> TFHubModel:
     """
-    Working tf_hub models
+    Returns the corresponding TFHubModel.
     """
 
-    _models = {
-        "PNASNet": PNASNet(),
-        "InceptionV3": InceptionV3()
-    }
+    logger = logging.getLogger("TFHubModels")
+    model = TFHUB_MODELS.get(model_name)
 
-    _logger = logging.getLogger("TFHubModels")
-
-    def get(self, module_name: str):
-        
-        model = self._models.get("InceptionV3") 
-        
-        if model is None:
-            self._logger.error(f"""
-Module name {module_name} not known.
+    if model is None:
+        logger.error(
+f"""
+Module name {model_name} not known.
 Available:
-{list(self._models.keys())}
+{list(TFHUB_MODELS.keys())}
 """)
-            exit()
 
-        return model
+    return model()
 
 class ConfigurationJson:
 
