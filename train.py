@@ -4,28 +4,28 @@ import logging
 import datetime
 
 import tensorflow as tf
+import numpy as np
 
 from package.model import ClassifierModel, FeatureExractor
 from package.dataset import tf_parse_single_example, TFRecordKeys
-from package.common import PROTEIN_LABEL, PathsJson, ConfigurationJson
+from package.common import PROTEIN_LABEL, PathsJson, ConfigurationJson, TFHubModels
 
 def _model_fn(feature_tensor: tf.Tensor, label_tensor: tf.Tensor):
 
+    model_config = TFHubModels(ConfigurationJson().TF_HUB_MODULE)
     model = ClassifierModel()
-    
-    feature_tensor.set_shape([None, 2048])
 
-    _, loss = model.predict_train(feature_tensor, label_tensor)
+    feature_tensor.set_shape([None, model_config.feature_vector_size])
+    logits, loss = model.predict_train(feature_tensor, label_tensor)
 
-    return loss, model
+    return logits, loss, model
 
-def _export_complete_model():
+def _export_complete_model(export_model_dir: str):
 
     export_path = ConfigurationJson().EXPORTED_MODEL_DIR
-
     logger = logging.getLogger("ModelExporter")
     logger.info(f"Exporting to {export_path}")
-    
+
     # pylint: disable=E1129
     with tf.Graph().as_default():
         sess = tf.Session()
@@ -92,8 +92,15 @@ and might make the model unusable in cpu-only machines.
             feature_batch = feature_dataset.make_one_shot_iterator().get_next()
             label_batch   = label_dataset.make_one_shot_iterator().get_next()
 
-        loss_tensor, model = _model_fn(feature_batch, label_batch)
+        logits_tensor, loss_tensor, model = _model_fn(feature_batch, label_batch)
         optimize_op = tf.train.AdamOptimizer().minimize(loss_tensor)
+
+        pred_tensor = tf.nn.sigmoid(logits_tensor)
+        
+        pred_mask = (pred_tensor == 1)
+        label_mask = (label_batch == 1)
+        all_maks = tf.logical_and(pred_mask, label_mask)
+        accuracy_tensor = tf.reduce_sum(tf.to_float(all_maks)) / tf.size(all_maks, tf.float32)
 
         config=tf.ConfigProto(
             device_count={'GPU': 0} if cpu_only else None,
@@ -101,12 +108,15 @@ and might make the model unusable in cpu-only machines.
 
         with tf.Session(config=config) as sess:
             sess.run(tf.global_variables_initializer())
+            sess.run(tf.local_variables_initializer())
 
             for i in range(epochs):
-                loss, _ = sess.run([loss_tensor, optimize_op])
+                _ = sess.run([optimize_op])
 
                 if i % 100 == 0:
-                    logger.info(f"Step: {i} of {epochs}, Loss: {loss}")
+                    pr, lb, loss, accuracy, _ = sess.run([pred_tensor, label_batch, loss_tensor, accuracy_tensor, optimize_op])
+                    logger.info(f"Step: {i} of {epochs}, Loss: {loss}, Accuracy: {accuracy}")
+                    print((pr[0] > 0.5).astype(np.int), '\n', lb[0])
 
             logger.info(f"Finished training. Saving model to {paths.MODEL_CHECKPOINT_DIR}")
 
@@ -117,8 +127,6 @@ and might make the model unusable in cpu-only machines.
             saver.save(sess, paths.MODEL_CHECKPOINT_DIR)
 
             sess.close()
-
-    _export_complete_model()
 
 
 if __name__ == "__main__":
@@ -138,28 +146,31 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Parse the dataset for efficient training.")
 
-    parser.add_argument("--cpu", action="store_true", help="""
-Force using the cpu even if a GPU is available.
-""")
-
-    parser.add_argument("--prefetch_gpu", action="store_true", help="""
-Prefetch to gpu for improved performance. Saved model might not work on cpu-only machines.
-""")
-    parser.add_argument("--epochs", type=int, default=config.EPOCHS, help=f"""
-The number of training steps. Defaults to the config file value ({config.EPOCHS}).
-""")
-    parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE, help=f"""
-The number of images that go through the deep learing model at once. 
-Large numbers can improve model quality. Defaults to the config file value ({config.BATCH_SIZE}).
-""")
     parser.add_argument("--overwrite", action="store_true", help="""
-Overwrite an existing saved_model directory.
-""")
+    Overwrite an existing saved_model directory.
+    """)
+    parser.add_argument("--export_dir", type=str, default=config.EXPORTED_MODEL_DIR, help = f"""
+    Final complete model export directory. Defaults to {config.EXPORTED_MODEL_DIR}.
+    """)
+    parser.add_argument("--epochs", type=int, default=config.EPOCHS, help=f"""
+    The number of training steps. Defaults to the config file value ({config.EPOCHS}).
+    """)
+    parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE, help=f"""
+    The number of images that go through the deep learing model at once. 
+    Large numbers can improve model quality. Defaults to the config file value ({config.BATCH_SIZE}).
+    """)
+    parser.add_argument("--cpu", action="store_true", help="""
+    Force using the cpu even if a GPU is available.
+    """)
+    parser.add_argument("--prefetch_gpu", action="store_true", help="""
+    Prefetch to gpu for improved performance. Saved model might not work on cpu-only machines.
+    """)
 
     args = parser.parse_args()
-    export_paths = [paths.MODEL_CHECKPOINT_DIR, config.EXPORTED_MODEL_DIR]
+    export_paths = [paths.MODEL_CHECKPOINT_DIR, args.export_dir]
 
     for path in export_paths:
+
         if os.path.exists(path):
             if args.overwrite:
                 shutil.rmtree(path)
@@ -172,3 +183,4 @@ Overwrite an existing saved_model directory.
         exit()
 
     train(args.epochs, args.batch_size, args.prefetch_gpu, args.cpu)
+    _export_complete_model(export_model_dir=args.export_dir)

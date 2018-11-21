@@ -64,8 +64,9 @@ class ClassifierModel:
             net = feature_tensor
 
             net = tf.layers.dense(net, 1024, tf.nn.relu)
-            net = tf.layers.dense(net, 1024, tf.nn.relu)
-            net = tf.layers.dense(net, 256, tf.nn.relu)
+            net = tf.layers.dense(net, 512, tf.nn.relu)
+            net = tf.layers.dense(net, 512, tf.nn.relu)
+            net = tf.layers.dense(net, 512, tf.nn.relu)
             net = tf.layers.dense(net, len(PROTEIN_LABEL.keys()), None)
 
             self._output = net
@@ -73,9 +74,9 @@ class ClassifierModel:
             if not is_training:
                 return net
 
-            loss = tf.losses.sigmoid_cross_entropy(label_tensor, net)
+            loss = -tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.to_float(label_tensor), logits=net)
             
-        return net, loss
+        return net, tf.reduce_mean(-loss)
 
     def load(self, sess: tf.Session):
         """

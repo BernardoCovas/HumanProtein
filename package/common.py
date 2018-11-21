@@ -34,6 +34,7 @@ PROTEIN_LABEL = {
     "27": "Rods & rings"
 }
 
+NUM_CLASSES = len(list(PROTEIN_LABEL.keys()))
 
 class TFHubModel:
 
@@ -215,11 +216,9 @@ class Submission:
 
     HEADER = "Id,Predicted"
 
-    def __init__(self, submission_name: str):
-        self.paths = PathsJson()
-        self.submission_file = open(
-            os.path.join(self.paths.SUBMISSION_DIR, submission_name + ".csv"),"w")
+    def __init__(self, submission_file: str):
 
+        self.submission_file = open(submission_file,"w")
         self.submission_file.write(self.HEADER + "\n")
 
     def add_submission(self, img_id: str, labels: list):
@@ -233,19 +232,10 @@ class Submission:
 # UTILS
 
 def one_hot_to_label(one_hot_list: np.ndarray):
-    labels = []
+    print(one_hot_list)
 
-    for vector in one_hot_list:
-        indexes = vector.nonzero()[0]
-
-        # FIXME (bcovas) temp fix for now.
-        if indexes.shape[0] == 0:
-            indexes = np.array([np.argmax(vector)])
-
-        labels.append(
-            list(map(str, indexes.tolist())))
-
-    return labels
+    labels = np.arange(28)[one_hot_list == 1]
+    return list(map(str, labels))
 
 def strip_fname_for_id(fname: str):
 
