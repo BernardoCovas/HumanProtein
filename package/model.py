@@ -59,13 +59,14 @@ class ClassifierModel:
         with tf.variable_scope(self._scope):
 
             self._input = feature_tensor
+            
+            # NOTE (bcovas) Sanity check. I fell for this one already.
+            net = feature_tensor
 
-            net = tf.layers.dense(feature_tensor, 1024, tf.nn.relu)
-            net = tf.layers.dense(feature_tensor, 512, tf.nn.relu)
-            net = tf.layers.dense(feature_tensor, 256, tf.nn.relu)
-            net = tf.layers.dense(feature_tensor, 128, tf.nn.relu)
-            net = tf.layers.dense(
-                feature_tensor, len(PROTEIN_LABEL.keys()), None)
+            net = tf.layers.dense(net, 1024, tf.nn.relu)
+            net = tf.layers.dense(net, 1024, tf.nn.relu)
+            net = tf.layers.dense(net, 256, tf.nn.relu)
+            net = tf.layers.dense(net, len(PROTEIN_LABEL.keys()), None)
 
             self._output = net
 
