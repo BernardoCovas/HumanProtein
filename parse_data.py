@@ -13,28 +13,26 @@
 # no GPU. if you have a GPU available, consider adding the --gpu argument.
 # (Depends on tensorflow-gpu)
 
-from package.model import FeatureExractor
-from package.common import PathsJson, PROTEIN_LABEL, strip_fname_for_id
-from package.dataset import Dataset, tf_write_single_example, tf_preprocess_directory_dataset
-import numpy as np
-import tensorflow_hub as tf_hub
-import tensorflow as tf
 import os
+import logging
+import itertools
 import queue
 import threading
 import multiprocessing
-import logging
-import itertools
+
+import numpy as np
+import tensorflow_hub as tf_hub
+import tensorflow as tf
+
+from package.model import FeatureExractor
+from package.common import PathsJson, PROTEIN_LABEL, strip_fname_for_id
+from package.dataset import Dataset, tf_write_single_example, tf_preprocess_directory_dataset
+
+tf.logging.set_verbosity(tf.logging.ERROR)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("parse_data")
-
-
-tf.logging.set_verbosity(tf.logging.ERROR)
-
-
-raw_dataset = Dataset()
-raw_dataset.prepare()
 
 
 def single_consumer(
@@ -44,10 +42,14 @@ def single_consumer(
         batch_size=100,
         save_image=False):
 
+    raw_dataset = Dataset()
+    raw_dataset.prepare()
+
     if paralell_calls is None:
         paralell_calls = os.cpu_count()
 
     logger = logging.getLogger("image_parser")
+    logger.info(f"Using batch_size of {batch_size}")
     logger.info(f"Using {paralell_calls} paralell calls.")
 
     if use_gpu:
@@ -94,6 +96,7 @@ def single_consumer(
 def write(example_queue: queue.Queue, tfrecord_fname: str):
 
     logger = logging.getLogger("example_writer")
+    raw_dataset = Dataset()
 
     with tf.python_io.TFRecordWriter(tfrecord_fname) as writer:
 
@@ -126,7 +129,13 @@ def write(example_queue: queue.Queue, tfrecord_fname: str):
 
 
 def main(args):
-
+    """
+    Even though, in this case, writing the features to disk 
+    barely takes any time at all, I usually separate the 
+    writing process from the prediction process.
+    In some setups this might massively improve performance.
+    """
+    
     logger = logging.getLogger("parse_data")
 
     tfrecord_fname = PathsJson().TRAIN_DATA_CLEAN_PATH
