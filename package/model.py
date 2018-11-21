@@ -3,7 +3,7 @@ import os
 import tensorflow as tf
 import tensorflow_hub as tf_hub
 
-from .common import ConfigurationJson, PathsJson, PROTEIN_LABEL
+from .common import ConfigurationJson, PathsJson, PROTEIN_LABEL, TFHubModels
 
 class FeatureExractor:
 
@@ -12,7 +12,7 @@ class FeatureExractor:
         self.paths = PathsJson()
         self.config = ConfigurationJson()
 
-        self._module = tf_hub.Module(self.config.TF_HUB_MODULE)
+        self._module = tf_hub.Module(TFHubModels(self.config.TF_HUB_MODULE).url)
 
     def predict(self, image_tensor: tf.Tensor):
         """
