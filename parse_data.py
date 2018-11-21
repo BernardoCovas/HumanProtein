@@ -110,12 +110,18 @@ def write(example_queue: queue.Queue, tfrecord_fname: str):
             features, fnames = example
 
             for feature, fname in zip(features, fnames):
+                
+                one_hot = np.zeros([raw_dataset.num_classes], np.int)
 
                 img_id = strip_fname_for_id(fname[0].decode())
                 img_labels = raw_dataset.label(img_id)
                 img_labels = list(map(int, img_labels))
+
+                for label in img_labels:
+                    one_hot[label] = 1
+
                 serialized_example = tf_write_single_example(
-                    feature, img_labels, img_id)
+                    feature, one_hot, img_id)
 
                 writer.write(serialized_example)
 
