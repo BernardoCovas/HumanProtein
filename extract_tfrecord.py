@@ -1,10 +1,10 @@
 #!/bin/python3
 
-# This file is meant for debugging. It extracts the contents of the tfrecord
-# and saves every image as $(img_id)($(labels)).png,
-# example: 32424qfqwfq34r(12_1).png.
+# This file is meant for debugging. 
+# It extracts the contents of the tfrecord and prints them.
 
 import os
+import random
 
 import tensorflow as tf
 
@@ -14,7 +14,6 @@ import package.dataset as dataset_module
 def main():
 
     train_record = PathsJson().TRAIN_DATA_CLEAN_PATH
-    out_path = os.path.dirname(train_record) + "/"
 
     graph = tf.Graph()
 
@@ -22,31 +21,21 @@ def main():
     with graph.as_default():
 
         dataset = tf.data.TFRecordDataset(train_record)
-        dataset = dataset.map(lambda x: dataset_module.tf_parse_single_example(x, True))
+        dataset = dataset.map(dataset_module.tf_parse_single_example)
 
         features = dataset.make_one_shot_iterator().get_next()
 
-        image_bytes_tensor = features[dataset_module.TFRecordKeys.ENCODED_KEY]
-        img_tensor = tf.image.decode_image(image_bytes_tensor)
-        shape_tensor = tf.shape(img_tensor)
-
         img_id_tensor = features[dataset_module.TFRecordKeys.ID_KEY]
         img_label_tensor = features[dataset_module.TFRecordKeys.LABEL_KEY]
-
-        out_path_tensor = out_path + features[dataset_module.TFRecordKeys.ID_KEY] + \
-            "(" + tf.strings.reduce_join(
-                tf.as_string(img_label_tensor), separator="_") + ").png"
-        
-        write_file = tf.write_file(out_path_tensor, image_bytes_tensor)
+        img_features_tensor = features[dataset_module.TFRecordKeys.IMG_FEATURES]
 
         sess = tf.Session()
         while True:
             try:
-                _, img_id, shape, labels = sess.run([write_file, img_id_tensor, shape_tensor, img_label_tensor])
-                print("Wrote: " + img_id.decode() + " of shape: " + str(shape) + " and labels: " + str(labels))
+                img_id, labels, features = sess.run([img_id_tensor, img_label_tensor, img_features_tensor])
+                print(f"{img_id.decode()} -> {str(labels)} : {len(features)} : {str(random.choice(features))[0:4]}")
 
             except tf.errors.OutOfRangeError:
-                print("Done.")
                 break
 
 if __name__ == "__main__":
