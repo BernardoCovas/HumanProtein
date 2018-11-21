@@ -29,7 +29,8 @@ class Dataset:
     dataset_path = ".data"
     _img_format = "png"
     _train_id_data = {}
-
+    _num_classes = len(common.PROTEIN_LABEL.keys())
+    
     _all_zip = "all.zip"
     _train_zip = "train.zip"
     _test_zip = "test.zip"
@@ -56,6 +57,10 @@ class Dataset:
     @property
     def num_examples(self):
         return len(self._train_id_data.keys())
+
+    @property
+    def num_classes(self):
+        return self._num_classes
 
     def prepare(self):
 
