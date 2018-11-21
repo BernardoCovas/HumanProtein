@@ -1,5 +1,5 @@
-import csv
 import os
+import logging
 
 import numpy as np
 
@@ -34,11 +34,80 @@ PROTEIN_LABEL = {
     "27": "Rods & rings"
 }
 
+class TFHubModel:
+
+    @property
+    def expected_image_size(self):
+        raise NotImplementedError()
+    
+    @property
+    def feature_vector_size(self):
+        raise NotImplementedError()
+
+    @property
+    def url(self):
+        raise NotImplementedError()
+
+class PNASNet(TFHubModel):
+
+    @property
+    def expected_image_size(self):
+        return (331, 331)
+
+    @property
+    def feature_vector_size(self):
+        return 4320
+
+    @property
+    def url(self):
+        return "https://tfhub.dev/google/imagenet/pnasnet_large/feature_vector/2"
+
+class InceptionV3(TFHubModel):
+
+    @property
+    def expected_image_size(self):
+        return (299, 299)
+
+    @property
+    def feature_vector_size(self):
+        return 2048
+
+    @property
+    def url(self):
+        return "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1"
+
+
+class TFHubModels:
+    """
+    Working tf_hub models
+    """
+
+    _models = {
+        "PNASNet": PNASNet(),
+        "InceptionV3": InceptionV3()
+    }
+
+    _logger = logging.getLogger("TFHubModels")
+
+    def get(self, module_name: str):
+        
+        model = self._models.get("InceptionV3") 
+        
+        if model is None:
+            self._logger.error(f"""
+Module name {module_name} not known.
+Available:
+{list(self._models.keys())}
+""")
+            exit()
+
+        return model
+
 class ConfigurationJson:
 
     CONFIG_FNAME = "CONFIGURATION.json"
     EXAMPEL_CONFIG = {
-        "TF_HUB_MODULE": "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1",
+        "TF_HUB_MODULE": "InceptionV3",
         "EXPORTED_MODEL_DIR": "./Exported/",
         "OVERWRITE_DATASET_IF_CURRUPTED": False,
         "BATCH_SIZE": "100",
