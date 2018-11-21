@@ -1,3 +1,5 @@
+import os
+
 import tensorflow as tf
 import tensorflow_hub as tf_hub
 
@@ -58,6 +60,7 @@ class ClassifierModel:
 
             self._input = feature_tensor
 
+            net = tf.layers.dense(feature_tensor, 1024, tf.nn.relu)
             net = tf.layers.dense(feature_tensor, 512, tf.nn.relu)
             net = tf.layers.dense(feature_tensor, 256, tf.nn.relu)
             net = tf.layers.dense(feature_tensor, 128, tf.nn.relu)
@@ -93,3 +96,29 @@ class ClassifierModel:
     @property
     def output_tensor(self):
         return self._output
+
+class ExportedModel:
+
+    _input_tensor = None
+    _output_tensor = None
+
+    def __init__(self):
+        self.config = ConfigurationJson()
+
+    def load(self, sess: tf.Session, input_tensor: tf.Tensor):
+
+        self._input_tensor = input_tensor
+
+        graph_def = tf.saved_model.loader.load(
+            sess,
+            [tf.saved_model.tag_constants.SERVING],
+            self.config.EXPORTED_MODEL_DIR,
+            input_map={'input': input_tensor})
+
+        outputs_mapping = dict(graph_def.signature_def['serving_default'].outputs)
+
+        out_tensor_name = outputs_mapping['output'].name
+        self._output_tensor = tf.get_default_graph().get_tensor_by_name(out_tensor_name)
+        
+        return self._output_tensor
+
