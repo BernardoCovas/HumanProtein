@@ -71,7 +71,6 @@ def train(
 
         dataset = tf.data.TFRecordDataset(tfrecord)
         dataset = dataset.repeat()
-        dataset = dataset.prefetch(batch_size * 2)
 
         dataset = dataset.map(dataset_module.tf_parse_single_example, num_parallel_calls=os.cpu_count() + 1)
 
@@ -83,10 +82,10 @@ def train(
 
         if prefetch:
             logger.warning(
-"""
-Using gpu prefetching. Notice that this op is saved in the graph, 
-and might make the model unusable in cpu-only machines.
-""")
+    """
+    Using gpu prefetching. Notice that this op is saved in the graph, 
+    and might make the model unusable in cpu-only machines.
+    """)
             feature_dataset = feature_dataset.apply(tf.data.experimental.prefetch_to_device("gpu:0", 2))
             label_dataset   = label_dataset.apply(tf.data.experimental.prefetch_to_device("gpu:0", 2))
 
