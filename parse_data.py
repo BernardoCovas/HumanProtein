@@ -186,10 +186,11 @@ def main(
         logger.warn(
             "Not using GPU. Add the '-h' argument for available options.")
     if save_images:
-        logger.warning(
-            "Saving images. This is not required for training.")
+        logger.info(
+            "Saving images.")
     else:
-        logger.info("Not saving images, not required.")
+        logger.warning("Not saving images. " + \
+            "You will not be able to train the feature extractor.")
 
     record_dirname = os.path.dirname(tfrecord_path)
 
@@ -229,16 +230,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Parse the dataset for efficient training.")
 
-    parser.add_argument("--save_images", action="store_true", help="""
-    Save the images to the tfrecord. They are not needed for training, 
-    and have a huge impact in performance. Defaults to 'False'.
+    parser.add_argument("--no_images", action="store_false", help="""
+    Don't save parsed images to disk.
     """)
     parser.add_argument("--gpu", action="store_true", help="""
     Use the gpu for improved performance. Depends on tensorflow-gpu.
     """)
     parser.add_argument("--paralell_calls", type=int, help="""
     The number of paralell calls to use for cpu map functions. 
-    Defaults to 'None' (Means = number of cpus).
+    Defaults to 'None' (Means = 1).
     """)
     parser.add_argument("--batch_size", type=int, default=10, help="""
     The number of images that go through the deep learing model at once. 
@@ -298,7 +298,7 @@ if __name__ == "__main__":
             pathsJson.TRAIN_DATA_CLEAN_PATH,
             pathsJson.TRAIN_FEAURES_RECORD,
             args.paralell_calls, args.gpu,
-            args.batch_size, args.save_images)
+            args.batch_size, args.no_images)
 
     if args.parse_predict:
 
@@ -311,7 +311,7 @@ if __name__ == "__main__":
             pathsJson.TEST_DATA_CLEAN_PATH,
             pathsJson.PREDICT_FEATURES_RECORD,
             args.paralell_calls, args.gpu,
-            args.batch_size, args.save_images)
+            args.batch_size, args.no_images)
 
     splitrecords(
         pathsJson.TRAIN_FEAURES_RECORD,
