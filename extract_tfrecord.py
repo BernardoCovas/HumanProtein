@@ -1,7 +1,12 @@
 #!/bin/python3
 
-# This file is meant for debugging. 
+# AUTHOR b.covas (bernardo.covas@outlook.com)
+
+# This file is meant for debugging.
 # It extracts the contents of the tfrecord and prints them.
+# It may provide some peace of mind if you are unsure about
+# the tfrecord saving / unit testing.
+
 
 import os
 import random
