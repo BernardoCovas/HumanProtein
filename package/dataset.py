@@ -129,7 +129,21 @@ def tf_imgid_to_img(img_id: str, dirname: str):
 
     return tf.stack(channels, axis=-1)
 
-def tf_preprocess_directory_dataset(dirname: str, paralell_readers=None):
+def tf_imgid_to_img_clean(img_id: str, dirname: str):
+    """
+    Utility function. Turns an image id into an image tensor.
+    Does not join the diferent channels, expects clean images.
+
+    NOTE: (bcovas) This might be temporary. Used for efficiency.
+    """
+    
+    img_path = tf.string_join([dirname, img_id, ".png"])
+    img_bytes = tf.read_file(img_path)
+    img = tf.image.decode_image(img_bytes)
+
+    return img
+
+def tf_preprocessed_directory_dataset(dirname: str, paralell_readers=None):
     """
     Retruns a tf.data.Dataset that iterates `dirname` and yields 
     (image_tensor, img_fname).
@@ -138,9 +152,12 @@ def tf_preprocess_directory_dataset(dirname: str, paralell_readers=None):
     Matches EVERY file.
     """
 
+    def _map_call(fname: str):
+        img_bytes = tf.read_file(fname)
+        return tf.image.decode_image(img_bytes)
+
     fname_dataset = tf.data.Dataset.list_files(dirname)
-    img_bytes_dataset = fname_dataset.map(tf.read_file, paralell_readers)
-    img_dataset = img_bytes_dataset.map(tf.image.decode_image, paralell_readers)
+    img_dataset = fname_dataset.map(_map_call, paralell_readers)
 
     return tf.data.Dataset.zip((img_dataset, fname_dataset))
 
@@ -183,4 +200,8 @@ def tf_parse_single_example(serialized_example: bytes, load_image_bytes=False):
         feature[TFRecordKeys.ENCODED_KEY] = tf.FixedLenFeature([], tf.string)
 
     features = tf.parse_single_example(serialized_example, features=feature)
-    return features
+
+    return (
+        features[TFRecordKeys.IMG_FEATURES],
+        features[TFRecordKeys.LABEL_KEY],
+        features[TFRecordKeys.ID_KEY])
