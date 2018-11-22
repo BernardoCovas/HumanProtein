@@ -1,3 +1,18 @@
+#!/bin/python3
+
+# AUTHOR b.covas (bernardo.covas@outlook.com)
+
+# This script is used to perform a submission.
+# It saves it in csv format in accordance to the
+# competition rules, to a filename controlled
+# by arguments, in the submission directory
+# in PATHS.json.
+
+# NOTE: This sctipt can be used in combination with
+# validate.py for easy experimenting.
+# Ex: "python .\make_submission.py test && python .\validate.py submission.csv"
+# performs an evaluation step.
+
 import os
 import time
 import logging
