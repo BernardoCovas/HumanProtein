@@ -37,6 +37,9 @@ class ClassifierModel:
     _scope = "ClassifierModel"
 
     def predict(self, feature_tensor: tf.Tensor):
+        """
+        Returns the classifier logits tensor.
+        """
         return self._model_fn(feature_tensor, None, False)
 
     def predict_train(self, feature_tensor: tf.Tensor, label_tensor: tf.Tensor):
@@ -63,10 +66,11 @@ class ClassifierModel:
             # NOTE (bcovas) Sanity check. I fell for this one already.
             net = feature_tensor
 
+            if is_training:
+                net = tf.nn.dropout(net, 0.5)
             net = tf.layers.dense(net, 1024, tf.nn.relu)
-            net = tf.layers.dense(net, 512, tf.nn.relu)
-            net = tf.layers.dense(net, 512, tf.nn.relu)
-            net = tf.layers.dense(net, 512, tf.nn.relu)
+            if is_training:
+                net = tf.nn.dropout(net, 0.5)
             net = tf.layers.dense(net, len(PROTEIN_LABEL.keys()), None)
 
             self._output = net

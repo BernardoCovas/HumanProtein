@@ -160,11 +160,20 @@ One will be created, please specify the locations for your config.
 
 class PathsJson:
 
+    _DIR_TRAIN = "train"
+    _DIR_TEST = "test"
+    _CSV_TRAIN = "train.csv"
+    _CSV_TEST = "sample_submission.csv"
+    _TRAIN_FEAURES_RECORD = "trainfeatures.record"
+    _PREDICT_FEATURES_RECORD = "predfeatures.record"
+    _TRAIN_RECORD = "trainrecord.record"
+    _TEST_RECORD = "testrecord.record"
+
     PATHS_JSON_FNAME = "PATHS.json"
     EXAMPLE_PATHS_JSON = {
         "RAW_DATA_DIR": "./.data/",
-        "TRAIN_DATA_CLEAN_PATH": "./.data/processed/train.record",
-        "TEST_DATA_CLEAN_PATH": "./.data/processed/test.record",
+        "TRAIN_DATA_CLEAN_PATH": "./.data/processed/train/",
+        "TEST_DATA_CLEAN_PATH": "./.data/processed/test/",
         "MODEL_CHECKPOINT_DIR": "./models/",
         "LOGS_DIR": "./logs/",
         "SUBMISSION_DIR": "./submissions/"
@@ -211,6 +220,30 @@ class PathsJson:
     @property
     def SUBMISSION_DIR(self):
         return self._path_config.get("SUBMISSION_DIR")
+    @property
+    def DIR_TRAIN(self):
+        return os.path.join(self.RAW_DATA_DIR, self._DIR_TRAIN)
+    @property
+    def DIR_TEST(self):
+        return os.path.join(self.RAW_DATA_DIR, self._DIR_TEST)
+    @property
+    def CSV_TRAIN(self):
+        return os.path.join(self.RAW_DATA_DIR, self._CSV_TRAIN)
+    @property
+    def CSV_TEST(self):
+        return os.path.join(self.RAW_DATA_DIR, self._CSV_TEST)
+    @property
+    def TRAIN_FEAURES_RECORD(self):
+        return os.path.join(self.RAW_DATA_DIR, self._TRAIN_FEAURES_RECORD)
+    @property
+    def PREDICT_FEATURES_RECORD(self):
+        return os.path.join(self.RAW_DATA_DIR, self._PREDICT_FEATURES_RECORD)
+    @property
+    def TRAIN_RECORD(self):
+        return os.path.join(self.TRAIN_DATA_CLEAN_PATH, self._TRAIN_RECORD)
+    @property
+    def TEST_RECORD(self):
+        return os.path.join(self.TEST_DATA_CLEAN_PATH, self._TEST_RECORD)
 
 class Submission:
 
@@ -232,7 +265,6 @@ class Submission:
 # UTILS
 
 def one_hot_to_label(one_hot_list: np.ndarray):
-    print(one_hot_list)
 
     labels = np.arange(28)[one_hot_list == 1]
     return list(map(str, labels))

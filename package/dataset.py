@@ -15,38 +15,44 @@ class Dataset:
     """
     Base dataset class. Download the raw 'all.zip'
     from the competition website.
-    Calling `self.prepare()` will extract the dataset if not
-    already extracted.
     For configuration, use the provided `PATHS.json`.
+    If your dir is already preprocessed, use 
+    `PreProcessedDataset` instead.
 
-    `https://www.kaggle.com/c/human-protein-atlas-image-classification`
+    https://www.kaggle.com/c/human-protein-atlas-image-classification
     """
 
     FILTER_LIST = ["red", "green", "blue", "yellow"]
-
-    DIR_TRAIN = "train"
-    DIR_TEST = "test"
-    CSV_TRAIN = "train.csv"
-    CSV_TEST = "sample_submission.csv"
-    TFRECORD_TRAIN = "train.record"
-    TFRECORD_TEST = "test.record"
-
     _data = {}
 
     def __init__(self, dirname: str, csv_file: str):
+        """
+        `dirname`: The directory containing all the images.
+        `csv_file`: The associated csv file with ids and labels.
+        """
+
         self._dirname = dirname
         self._csv_file = csv_file
-        self.load()
+        self.reload()
 
     @property
     def img_ids(self):
         return list(self._data.keys())
-    
-    def load(self):
 
-        # NOTE (bcovas) If already loaded
-        if self._data != {}:
-            return
+    @property
+    def csv_file(self):
+        return self._csv_file
+
+    @property
+    def directory(self):
+        return self._dirname
+    
+    def reload(self):
+        """
+        Reloads the associated csv file. This is generally
+        not needed, but might come in handy if you are using
+        and interactive python environment.
+        """
 
         with open(self._csv_file) as f:
 
@@ -59,7 +65,7 @@ class Dataset:
                 img_labels = label.split(" ")
                 self._data[img_id] = img_labels
 
-    def get_img_paths(self, img_id: str):
+    def get_img_path(self, img_id: str) -> list:
 
         if self._data.get(img_id) is None:
             raise ValueError(f"{img_id} does not exist in this dataset.")
@@ -77,12 +83,26 @@ class Dataset:
 
         for img_id in self._data.keys():
 
-            paths = self.get_img_paths(img_id)
+            paths = self.get_img_path(img_id)
             for path in paths:
                 if not os.path.exists(path):
                     return False
 
         return True
+
+    def label(self, img_id: str):
+        return self._data.get(img_id)
+
+
+class PreProcessedDataset(Dataset):
+
+    def get_img_path(self, img_id: str) -> str:
+
+        if self._data.get(img_id) is None:
+            raise ValueError(f"{img_id} does not exist in this dataset.")
+
+        return os.path.join(self._dirname, f"{img_id}.png")
+
 
 # TENSORFLOW FUNCTIONS
 
@@ -94,7 +114,12 @@ class TFRecordKeys:
     IMG_FEATURES = "image/features"
 
 def tf_imgid_to_img(img_id: str, dirname: str):
-    
+    """
+    Utility function. Turns an image id into an image tensor.
+    Finds and joins the diferent channels.
+
+    NOTE: (bcovas) This might be temporary. Used for efficiency.
+    """
     channels = []
     for channel in Dataset.FILTER_LIST:
         image_bytes = tf.read_file(tf.string_join([
@@ -102,46 +127,22 @@ def tf_imgid_to_img(img_id: str, dirname: str):
         channel = tf.image.decode_image(image_bytes)
         channels.append(tf.squeeze(channel))
 
-
     return tf.stack(channels, axis=-1)
 
 def tf_preprocess_directory_dataset(dirname: str, paralell_readers=None):
-        """
-        Retruns a tf.data.Dataset that iterates `dirname` and yields (image_tensor, img_id).
-        """
-        
-        def _map_fn(*channels):
+    """
+    Retruns a tf.data.Dataset that iterates `dirname` and yields 
+    (image_tensor, img_fname).
 
-            image_tensor = []
+    Does NOT apply any preprocessing except for joining channels.
+    Matches EVERY file.
+    """
 
-            for channel in channels:
-                channel = tf.image.decode_image(channel)
-                channel = tf.squeeze(channel)
-                
-                image_tensor.append(channel)
+    fname_dataset = tf.data.Dataset.list_files(dirname)
+    img_bytes_dataset = fname_dataset.map(tf.read_file, paralell_readers)
+    img_dataset = img_bytes_dataset.map(tf.image.decode_image, paralell_readers)
 
-            image_tensor = tf.stack(image_tensor, -1)
-
-            return image_tensor
-        
-        filters = ["red", "green", "blue"]
-        datasets = []
-        file_name_datasets = []
-
-        for filter_name in filters:
-            dataset = tf.data.Dataset.list_files(
-                # NOTE (bcovas) Match all files of a single filter
-                os.path.join(dirname, f"*{filter_name}.png"), shuffle=False)
-            file_name_datasets.append(dataset)
-            dataset = dataset.map(lambda x: tf.read_file(x), paralell_readers)
-            datasets.append(dataset)
-
-        file_name_dataset = tf.data.Dataset.zip(tuple(file_name_datasets)) \
-            .map(lambda *fnames: tf.stack(fnames))
-        
-        dataset = tf.data.Dataset.zip(tuple(datasets)).map(_map_fn, paralell_readers)
-
-        return tf.data.Dataset.zip((dataset, file_name_dataset))
+    return tf.data.Dataset.zip((img_dataset, fname_dataset))
 
 def _int64_feature(value_list):
   return tf.train.Feature(int64_list=tf.train.Int64List(value=value_list))

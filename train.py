@@ -6,14 +6,12 @@ import datetime
 import tensorflow as tf
 import numpy as np
 
-from package.model import ClassifierModel, FeatureExractor
-from package.dataset import tf_parse_single_example, TFRecordKeys
-from package.common import PROTEIN_LABEL, PathsJson, ConfigurationJson, TFHubModels
+from package import common, dataset as dataset_module, model as model_module
 
 def _model_fn(feature_tensor: tf.Tensor, label_tensor: tf.Tensor):
 
-    model_config = TFHubModels(ConfigurationJson().TF_HUB_MODULE)
-    model = ClassifierModel()
+    model_config = common.TFHubModels(common.ConfigurationJson().TF_HUB_MODULE)
+    model = model_module.ClassifierModel()
 
     feature_tensor.set_shape([None, model_config.feature_vector_size])
     logits, loss = model.predict_train(feature_tensor, label_tensor)
@@ -22,7 +20,7 @@ def _model_fn(feature_tensor: tf.Tensor, label_tensor: tf.Tensor):
 
 def _export_complete_model(export_model_dir: str):
 
-    export_path = ConfigurationJson().EXPORTED_MODEL_DIR
+    export_path = common.ConfigurationJson().EXPORTED_MODEL_DIR
     logger = logging.getLogger("ModelExporter")
     logger.info(f"Exporting to {export_path}")
 
@@ -32,8 +30,8 @@ def _export_complete_model(export_model_dir: str):
 
         input_tensor = tf.placeholder(tf.uint8, [None, None, None, 3], name="input")
 
-        feature_model = FeatureExractor()
-        classifier = ClassifierModel()
+        feature_model = model_module.FeatureExractor()
+        classifier = model_module.ClassifierModel()
 
         feature_map_tensor = feature_model.preprocess(input_tensor)
         feature_map_tensor = feature_model.predict(feature_map_tensor)
@@ -46,7 +44,7 @@ def _export_complete_model(export_model_dir: str):
 
         tf.saved_model.simple_save(
             sess,
-            ConfigurationJson().EXPORTED_MODEL_DIR,
+            common.ConfigurationJson().EXPORTED_MODEL_DIR,
             {"input": input_tensor},
             {"output": predictions_tensor})
 
@@ -54,10 +52,16 @@ def _export_complete_model(export_model_dir: str):
 
     logger.info("Done.")
 
-def train(epochs: int, batch_size: int, prefetch: bool, cpu_only: bool):
+def train(
+        epochs: int,
+        batch_size: int,
+        restore: bool,
+        prefetch: bool,
+        cpu_only: bool,
+        tfrecord: str):
 
     logger = logging.getLogger("trainer")
-    paths = PathsJson()
+    paths = common.PathsJson()
 
     logger.info(f"Using batch of {batch_size}")
     logger.info(f"Training for {epochs} epochs")
@@ -65,13 +69,14 @@ def train(epochs: int, batch_size: int, prefetch: bool, cpu_only: bool):
     # pylint: disable=E1129
     with tf.Graph().as_default():
 
-        dataset = tf.data.TFRecordDataset(PathsJson().TRAIN_DATA_CLEAN_PATH)
+        dataset = tf.data.TFRecordDataset(tfrecord)
         dataset = dataset.repeat()
-        dataset = dataset.prefetch(os.cpu_count() + 1)
-        dataset = dataset.map(tf_parse_single_example, num_parallel_calls=os.cpu_count() + 1)
+        dataset = dataset.prefetch(batch_size * 2)
 
-        feature_dataset = dataset.map(lambda x: x[TFRecordKeys.IMG_FEATURES])
-        label_dataset = dataset.map(lambda x: x[TFRecordKeys.LABEL_KEY])
+        dataset = dataset.map(dataset_module.tf_parse_single_example, num_parallel_calls=os.cpu_count() + 1)
+
+        feature_dataset = dataset.map(lambda x: x[dataset_module.TFRecordKeys.IMG_FEATURES])
+        label_dataset = dataset.map(lambda x: x[dataset_module.TFRecordKeys.LABEL_KEY])
 
         feature_dataset = feature_dataset.batch(batch_size)
         label_dataset = label_dataset.batch(batch_size)
@@ -89,43 +94,47 @@ and might make the model unusable in cpu-only machines.
             feature_dataset = feature_dataset.prefetch(2)
             label_dataset = label_dataset.prefetch(2)
 
-            feature_batch = feature_dataset.make_one_shot_iterator().get_next()
-            label_batch   = label_dataset.make_one_shot_iterator().get_next()
+        feature_batch = feature_dataset.make_one_shot_iterator().get_next()
+        label_batch   = label_dataset.make_one_shot_iterator().get_next()
 
         logits_tensor, loss_tensor, model = _model_fn(feature_batch, label_batch)
         optimize_op = tf.train.AdamOptimizer().minimize(loss_tensor)
 
         pred_tensor = tf.nn.sigmoid(logits_tensor)
-        
-        pred_mask = (pred_tensor == 1)
-        label_mask = (label_batch == 1)
-        all_maks = tf.logical_and(pred_mask, label_mask)
-        accuracy_tensor = tf.reduce_sum(tf.to_float(all_maks)) / tf.size(all_maks, tf.float32)
 
         config=tf.ConfigProto(
             device_count={'GPU': 0} if cpu_only else None,
         )
 
+        var_list = tf.get_default_graph().get_collection(
+            tf.GraphKeys.TRAINABLE_VARIABLES, scope=model.variable_scope)
+        saver = tf.train.Saver(var_list=var_list)
+
         with tf.Session(config=config) as sess:
             sess.run(tf.global_variables_initializer())
             sess.run(tf.local_variables_initializer())
+
+            if restore:
+                model.load(sess)
 
             for i in range(epochs):
                 _ = sess.run([optimize_op])
 
                 if i % 100 == 0:
-                    pr, lb, loss, accuracy, _ = sess.run([pred_tensor, label_batch, loss_tensor, accuracy_tensor, optimize_op])
-                    logger.info(f"Step: {i} of {epochs}, Loss: {loss}, Accuracy: {accuracy}")
-                    print((pr[0] > 0.5).astype(np.int), '\n', lb[0])
+                    pr, lb, loss, _ = sess.run([pred_tensor, label_batch, loss_tensor, optimize_op])
+                    pr = pr > 0.5
+                    
+                    correct = np.sum(np.all(pr == lb, axis=1)) / np.size(pr, axis=0)
+
+                    logger.info(f"Step: {i} of {epochs}, Loss: {loss}, correct: {correct}")
+                
+                if i % 1000 == 0:
+                    logger.info(f"Saving model for step {i}.")
+                    saver.save(sess, paths.MODEL_CHECKPOINT_DIR)
 
             logger.info(f"Finished training. Saving model to {paths.MODEL_CHECKPOINT_DIR}")
 
-            var_list = tf.get_default_graph().get_collection(
-                tf.GraphKeys.TRAINABLE_VARIABLES, scope=model.variable_scope)
-
-            saver = tf.train.Saver(var_list=var_list)
             saver.save(sess, paths.MODEL_CHECKPOINT_DIR)
-
             sess.close()
 
 
@@ -137,8 +146,8 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("train_script")
-    config = ConfigurationJson()
-    paths = PathsJson()
+    config = common.ConfigurationJson()
+    paths = common.PathsJson()
 
     tf.logging.set_verbosity(tf.logging.ERROR)
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -149,6 +158,9 @@ if __name__ == "__main__":
     parser.add_argument("--overwrite", action="store_true", help="""
     Overwrite an existing saved_model directory.
     """)
+    parser.add_argument("--record", default=paths.TRAIN_RECORD, help=f"""
+    Path of the training tfrecord. Defaults to {paths.TRAIN_RECORD}.
+    """)
     parser.add_argument("--export_dir", type=str, default=config.EXPORTED_MODEL_DIR, help = f"""
     Final complete model export directory. Defaults to {config.EXPORTED_MODEL_DIR}.
     """)
@@ -156,7 +168,7 @@ if __name__ == "__main__":
     The number of training steps. Defaults to the config file value ({config.EPOCHS}).
     """)
     parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE, help=f"""
-    The number of images that go through the deep learing model at once. 
+    The number of images that go through the deep learing model at once.
     Large numbers can improve model quality. Defaults to the config file value ({config.BATCH_SIZE}).
     """)
     parser.add_argument("--cpu", action="store_true", help="""
@@ -168,19 +180,20 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     export_paths = [paths.MODEL_CHECKPOINT_DIR, args.export_dir]
+    restore = True;
 
     for path in export_paths:
 
         if os.path.exists(path):
             if args.overwrite:
                 shutil.rmtree(path)
+                restore = False
             else:
-                logger.error(f"{path} not empty. Use '--help' for options.")
-                exit()
+                logger.error(f"Restoring model...")
 
     if args.prefetch_gpu and args.cpu:
         logger.error("Can't force cpu and prefetch gpu. See '--help'.")
         exit()
 
-    train(args.epochs, args.batch_size, args.prefetch_gpu, args.cpu)
+    train(args.epochs, args.batch_size, restore, args.prefetch_gpu, args.cpu, args.record)
     _export_complete_model(export_model_dir=args.export_dir)
