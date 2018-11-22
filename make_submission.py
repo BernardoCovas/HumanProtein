@@ -123,10 +123,16 @@ if __name__ == "__main__":
 
     argparser = argparse.ArgumentParser()
     argparser.add_argument(
-        "feature_record", help=f"""
+        "--use_full_model", action="store_true", help=f"""
+    Use the full model and consume a directory,
+    or use only the classifier on cached image features.
+    """)
+    argparser.add_argument(
+        "--feature_record", help=f"""
     What feature_record to use. Defaults to predict. {list(records.keys())}
     """)
-    argparser.add_argument("--validate", action="store_true", help=f"""
+    argparser.add_argument(
+        "--validate", action="store_true", help=f"""
     Validate the prediction order with the sample csv. (If prediction is 'predict')
     """)
     argparser.add_argument(
@@ -152,6 +158,7 @@ if __name__ == "__main__":
         os.makedirs(paths.SUBMISSION_DIR)
 
     sub_file = os.path.join(paths.SUBMISSION_DIR, args.submission_name)
+
     queue = multiprocessing.Queue(10)
 
     producer = multiprocessing.Process(
