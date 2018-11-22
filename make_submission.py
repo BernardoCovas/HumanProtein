@@ -40,13 +40,10 @@ def run_prediction(
 
         dataset = tf.data.TFRecordDataset(tfrecord_name) \
             .map(protein_dataset.tf_parse_single_example) \
-            .map(lambda x: (
-                x[protein_dataset.TFRecordKeys.IMG_FEATURES],
-                x[protein_dataset.TFRecordKeys.ID_KEY])) \
-            .prefetch(batch_size) \
-            .batch(batch_size)
+            .batch(batch_size) \
+            .prefetch(2)
 
-        features_tensor, id_tensor = dataset.make_one_shot_iterator().get_next()
+        features_tensor, labels_tensor, id_tensor = dataset.make_one_shot_iterator().get_next()
         features_tensor.set_shape([None, model_config.feature_vector_size])
         logits_tensor = model.predict(features_tensor)
         prediction_tensor = tf.sigmoid(logits_tensor)
@@ -130,7 +127,7 @@ if __name__ == "__main__":
     What feature_record to use. Defaults to predict. {list(records.keys())}
     """)
     argparser.add_argument("--validate", action="store_true", help=f"""
-    Validate the prediction order with the sample csv.
+    Validate the prediction order with the sample csv. (If prediction is 'predict')
     """)
     argparser.add_argument(
         "--submission_name", default="submission.csv", help=f"""
@@ -175,7 +172,10 @@ if __name__ == "__main__":
     consumer.join()
 
     if args.validate:
-        validate_sumbission(paths.CSV_TRAIN, sub_file)
+        if args.feature_record == "predict":
+            validate_sumbission(paths.CSV_TEST, sub_file)
+        else:
+            logger.error(f"Can't validate '{args.feature_record}'. Only 'predict'.")
 
     end = time.time()
 

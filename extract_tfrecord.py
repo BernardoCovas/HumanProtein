@@ -27,17 +27,13 @@ def main(tfrecord_path: str):
         dataset = dataset.map(dataset_module.tf_parse_single_example, 2)
         dataset = dataset.prefetch(10)
 
-        features = dataset.make_one_shot_iterator().get_next()
-
-        img_id_tensor = features[dataset_module.TFRecordKeys.ID_KEY]
-        img_label_tensor = features[dataset_module.TFRecordKeys.LABEL_KEY]
-        img_features_tensor = features[dataset_module.TFRecordKeys.IMG_FEATURES]
+        features_tensor, label_tensor, img_id_tensor = dataset.make_one_shot_iterator().get_next()
 
         sess = tf.Session()
         n = 0
         while True:
             try:
-                img_id, labels, features = sess.run([img_id_tensor, img_label_tensor, img_features_tensor])
+                img_id, labels, features = sess.run([img_id_tensor, label_tensor, features_tensor])
                 print(f"{img_id.decode()} -> {str(labels)} : {len(features)} : {str(random.choice(features))[0:4]}")
                 n += 1
             except tf.errors.OutOfRangeError:
