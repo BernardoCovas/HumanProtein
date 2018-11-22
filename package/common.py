@@ -107,7 +107,6 @@ class ConfigurationJson:
     EXAMPEL_CONFIG = {
         "TF_HUB_MODULE": "InceptionV3",
         "EXPORTED_MODEL_DIR": "./Exported/",
-        "OVERWRITE_DATASET_IF_CURRUPTED": False,
         "BATCH_SIZE": "100",
         "EPOCHS": "100000"
     }
@@ -125,15 +124,15 @@ class ConfigurationJson:
         if not os.path.exists(self.CONFIG_FNAME):
 
             self._logger.error(
-f"""
-No {self.CONFIG_FNAME} available.
-One will be created, please specify the locations for your config.
-""")
+    f"""
+
+    No {self.CONFIG_FNAME} available.
+    One will be created, please specify the locations for your config.
+    """)
 
             with open(self.CONFIG_FNAME, "w") as json_file:
                 json.dump(self.EXAMPEL_CONFIG, json_file, indent=2)
-
-            raise FileNotFoundError(f"No {self.CONFIG_FNAME} found.")
+            exit(1)
 
         with open(self.CONFIG_FNAME) as json_file:
             self._config_data = json.load(json_file)
@@ -153,10 +152,6 @@ One will be created, please specify the locations for your config.
     @property
     def EXPORTED_MODEL_DIR(self):
         return str(self._config_data.get("EXPORTED_MODEL_DIR"))
-
-    @property
-    def OVERWRITE_DATASET_IF_CURRUPTED(self):
-        return bool(self._config_data.get("OVERWRITE_DATASET_IF_CURRUPTED"))
 
 class PathsJson:
 
