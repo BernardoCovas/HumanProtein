@@ -180,7 +180,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     export_paths = [paths.MODEL_CHECKPOINT_DIR, args.export_dir]
-    restore = True;
+    restore = True
 
     for path in export_paths:
 
