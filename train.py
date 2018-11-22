@@ -1,7 +1,9 @@
 import os
+import shutil
+import time
 import threading
 import logging
-import datetime
+import random
 
 import tensorflow as tf
 import numpy as np
@@ -11,12 +13,16 @@ from package import common, dataset as dataset_module, model as model_module
 def _model_fn(feature_tensor: tf.Tensor, label_tensor: tf.Tensor):
 
     model_config = common.TFHubModels(common.ConfigurationJson().TF_HUB_MODULE)
-    model = model_module.ClassifierModel()
+    model = model_module.ClassifierModel(True)
 
     feature_tensor.set_shape([None, model_config.feature_vector_size])
-    logits, loss = model.predict_train(feature_tensor, label_tensor)
+    logits_tensor = model.predict(feature_tensor)
+    loss_tensor = tf.nn.sigmoid_cross_entropy_with_logits(
+        labels=tf.to_float(label_tensor), logits=logits_tensor)
+    loss_tensor = tf.reduce_mean(loss_tensor)
+    pred_tensor = tf.nn.sigmoid(logits_tensor)
 
-    return logits, loss, model
+    return pred_tensor, loss_tensor, model
 
 def _export_complete_model(export_model_dir: str):
 
@@ -30,7 +36,7 @@ def _export_complete_model(export_model_dir: str):
 
         input_tensor = tf.placeholder(tf.uint8, [None, None, None, 3], name="input")
 
-        feature_model = model_module.FeatureExractor()
+        feature_model = model_module.FeatureExractor(True)
         classifier = model_module.ClassifierModel()
 
         feature_map_tensor = feature_model.preprocess(input_tensor)
@@ -40,7 +46,18 @@ def _export_complete_model(export_model_dir: str):
         predictions_tensor = tf.sigmoid(logits, name="predictions")
 
         sess.run(tf.global_variables_initializer())
-        classifier.load(sess)
+        
+        for model in [feature_model, classifier]:
+            try:
+                model.load(sess)
+            except ValueError:
+                logger.warning(f"Restore failed. Loading default {model.variable_scope}")
+
+        export_dir = common.ConfigurationJson().EXPORTED_MODEL_DIR
+
+        if os.path.exists(export_dir):
+            logger.warning(f"Overwriting {export_dir}...")
+            shutil.rmtree(export_dir, True)
 
         tf.saved_model.simple_save(
             sess,
@@ -55,16 +72,23 @@ def _export_complete_model(export_model_dir: str):
 def train(
         epochs: int,
         batch_size: int,
-        restore: bool,
-        prefetch: bool,
+        train_backend: bool,
         cpu_only: bool,
         tfrecord: str):
+
+    LR = 0.001
 
     logger = logging.getLogger("trainer")
     paths = common.PathsJson()
 
     logger.info(f"Using batch of {batch_size}")
     logger.info(f"Training for {epochs} epochs")
+    if train_backend:
+        logger.info(f"Training backend network")
+
+    feature_batch = None
+    label_batch = None
+    models = []
 
     # pylint: disable=E1129
     with tf.Graph().as_default():
@@ -72,68 +96,72 @@ def train(
         dataset = tf.data.TFRecordDataset(tfrecord)
         dataset = dataset.repeat()
 
-        dataset = dataset.map(dataset_module.tf_parse_single_example, num_parallel_calls=os.cpu_count() + 1)
+        feature_label_id_dataset = dataset.map(dataset_module.tf_parse_single_example,
+            num_parallel_calls=os.cpu_count() + 1)
 
-        feature_dataset = dataset.map(lambda x: x[dataset_module.TFRecordKeys.IMG_FEATURES])
-        label_dataset = dataset.map(lambda x: x[dataset_module.TFRecordKeys.LABEL_KEY])
+        if train_backend:
 
-        feature_dataset = feature_dataset.batch(batch_size)
-        label_dataset = label_dataset.batch(batch_size)
+            feature_label_id_dataset = feature_label_id_dataset.map(
+                lambda x, y, z: (x, y, dataset_module.tf_imgid_to_img_clean(
+                    z, paths.TRAIN_DATA_CLEAN_PATH + "\\")), os.cpu_count())
 
-        if prefetch:
-            logger.warning(
-    """
-    Using gpu prefetching. Notice that this op is saved in the graph, 
-    and might make the model unusable in cpu-only machines.
-    """)
-            feature_dataset = feature_dataset.apply(tf.data.experimental.prefetch_to_device("gpu:0", 2))
-            label_dataset   = label_dataset.apply(tf.data.experimental.prefetch_to_device("gpu:0", 2))
+        feature_batch, label_batch, img_batch = feature_label_id_dataset \
+            .batch(batch_size) \
+            .make_one_shot_iterator().get_next()
 
-        else:
-            feature_dataset = feature_dataset.prefetch(2)
-            label_dataset = label_dataset.prefetch(2)
+        if train_backend:
 
-        feature_batch = feature_dataset.make_one_shot_iterator().get_next()
-        label_batch   = label_dataset.make_one_shot_iterator().get_next()
+            model = model_module.FeatureExractor(True)
+            feature_batch = model.predict(model.preprocess(img_batch))
+            models.append(model)
 
-        logits_tensor, loss_tensor, model = _model_fn(feature_batch, label_batch)
-        optimize_op = tf.train.AdamOptimizer().minimize(loss_tensor)
-
-        pred_tensor = tf.nn.sigmoid(logits_tensor)
+        pred_tensor, loss_tensor, model = _model_fn(feature_batch, label_batch)
+        optimize_op = tf.train.AdamOptimizer(LR).minimize(loss_tensor)
+        
+        models.append(model)
 
         config=tf.ConfigProto(
             device_count={'GPU': 0} if cpu_only else None,
         )
 
-        var_list = tf.get_default_graph().get_collection(
-            tf.GraphKeys.TRAINABLE_VARIABLES, scope=model.variable_scope)
-        saver = tf.train.Saver(var_list=var_list)
-
         with tf.Session(config=config) as sess:
             sess.run(tf.global_variables_initializer())
             sess.run(tf.local_variables_initializer())
 
-            if restore:
-                model.load(sess)
+            for model in models:
+                if model.checkpoint_available():
+                    logger.info(f"Restoring {model.variable_scope}...")
+                    model.load(sess)
 
+            init = time.time()
             for i in range(epochs):
                 _ = sess.run([optimize_op])
 
                 if i % 100 == 0:
                     pr, lb, loss, _ = sess.run([pred_tensor, label_batch, loss_tensor, optimize_op])
-                    pr = pr > 0.5
-                    
+
+                    pr = (pr > 0.5).astype(np.int32)
                     correct = np.sum(np.all(pr == lb, axis=1)) / np.size(pr, axis=0)
 
                     logger.info(f"Step: {i} of {epochs}, Loss: {loss}, correct: {correct}")
                 
-                if i % 1000 == 0:
-                    logger.info(f"Saving model for step {i}.")
-                    saver.save(sess, paths.MODEL_CHECKPOINT_DIR)
+                if i % 1000 == 0 and i != 0:
 
-            logger.info(f"Finished training. Saving model to {paths.MODEL_CHECKPOINT_DIR}")
+                    end = time.time()
+                    steps = 1000 * batch_size
+                    timer = (end - init) / steps
+                    timer *= 10**5
 
-            saver.save(sess, paths.MODEL_CHECKPOINT_DIR)
+                    for model in models:
+                        logger.info(f"Saving {model.variable_scope} for step {i}.")
+                        model.save(sess)
+                    logger.info(f"{round(timer, 4)}s / 10e5 examples.")
+
+                    init = time.time()
+
+            for model in models:
+                logger.info(f"Finished training. Saving {model.variable_scope} to {paths.MODEL_CHECKPOINT_DIR}")
+                model.save(sess)
             sess.close()
 
 
@@ -141,7 +169,6 @@ if __name__ == "__main__":
 
     import argparse
     import os
-    import shutil
 
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("train_script")
@@ -156,6 +183,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--overwrite", action="store_true", help="""
     Overwrite an existing saved_model directory.
+    """)
+    parser.add_argument("--train_feature_extractor", action="store_true", help="""
+    Wether to train the backend CNN.
     """)
     parser.add_argument("--record", default=paths.TRAIN_RECORD, help=f"""
     Path of the training tfrecord. Defaults to {paths.TRAIN_RECORD}.
@@ -173,26 +203,15 @@ if __name__ == "__main__":
     parser.add_argument("--cpu", action="store_true", help="""
     Force using the cpu even if a GPU is available.
     """)
-    parser.add_argument("--prefetch_gpu", action="store_true", help="""
-    Prefetch to gpu for improved performance. Saved model might not work on cpu-only machines.
-    """)
 
     args = parser.parse_args()
-    export_paths = [paths.MODEL_CHECKPOINT_DIR, args.export_dir]
-    restore = True
+    dirnames = [paths.MODEL_CHECKPOINT_DIR, args.export_dir]
 
-    for path in export_paths:
+    if args.overwrite:
+        for dirname in dirnames:
+            shutil.rmtree(dirname, True)
 
-        if os.path.exists(path):
-            if args.overwrite:
-                shutil.rmtree(path)
-                restore = False
-            else:
-                logger.error(f"Restoring model...")
+    train(args.epochs, args.batch_size, 
+        args.train_feature_extractor, args.cpu, args.record)
 
-    if args.prefetch_gpu and args.cpu:
-        logger.error("Can't force cpu and prefetch gpu. See '--help'.")
-        exit()
-
-    train(args.epochs, args.batch_size, restore, args.prefetch_gpu, args.cpu, args.record)
     _export_complete_model(export_model_dir=args.export_dir)
