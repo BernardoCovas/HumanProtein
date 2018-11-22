@@ -15,6 +15,6 @@ CONFIGURATION.json
 # TF MODEL DATA
 **/checkpoint
 **/*.index
-**/.meta
+**/*.meta
 **/*.pb
 **/*.data-*
