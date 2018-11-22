@@ -143,7 +143,7 @@ def splitrecords(record: str, train_record: str, test_record: str, train_proba: 
     n_test = 0
     n_train = 0
 
-    logger.info(f"Spliting from {record} to {test_record} and {train_record}...")
+    logger.info(f"Spliting at {train_proba}...")
     
     for record_str in tf.python_io.tf_record_iterator(record):
 
@@ -154,7 +154,13 @@ def splitrecords(record: str, train_record: str, test_record: str, train_proba: 
             train_writer.write(record_str)
             n_train += 1
 
-    logger.info(f"{str(n_train)} in {train_record} and {str(n_test)} in {test_record}.")
+    logger.info(f"""
+    
+    {str(n_train)} examples in:
+        {train_record} 
+    and {str(n_test)} examples in:
+        {test_record}.
+    """)
 
 
 def main(
@@ -170,6 +176,20 @@ def main(
     writing process from the prediction process.
     In some setups this might massively improve performance.
     """
+
+    logger = logging.getLogger("MainImageParser")
+    logger.info(f"Using batch_size of {batch_size}")
+    logger.info(f"Using {paralell_calls} paralell calls.")
+    if gpu:
+        logger.info("Using GPU.")
+    else:
+        logger.warn(
+            "Not using GPU. Add the '-h' argument for available options.")
+    if save_images:
+        logger.warning(
+            "Saving images. This is not required for training.")
+    else:
+        logger.info("Not saving images, not required.")
 
     record_dirname = os.path.dirname(tfrecord_path)
 
@@ -248,20 +268,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     logger = logging.getLogger("ImageParser")
-    logger.info(f"Using batch_size of {args.batch_size}")
-    logger.info(f"Using {args.paralell_calls} paralell calls.")
-
-    if args.gpu:
-        logger.info("Using GPU.")
-    else:
-        logger.warn(
-            "Not using GPU. Add the '-h' argument for available options.")
-
-    if args.save_images:
-        logger.warning(
-            "Saving images. This is not required for training.")
-    else:
-        logger.info("Not saving images, not required.")
 
     paths = []
     if args.parse_train:
