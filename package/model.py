@@ -56,6 +56,11 @@ class ClassifierModel:
             is_training=False
         ):
 
+        if is_training:
+            keep_prob = 0.5
+        else:
+            keep_prob = 1
+
         if is_training and label_tensor is None:
             return ValueError("Model is set to training but no labels were supplied.")
 
@@ -66,11 +71,9 @@ class ClassifierModel:
             # NOTE (bcovas) Sanity check. I fell for this one already.
             net = feature_tensor
 
-            if is_training:
-                net = tf.nn.dropout(net, 0.5)
+            net = tf.nn.dropout(net, keep_prob)
             net = tf.layers.dense(net, 1024, tf.nn.relu)
-            if is_training:
-                net = tf.nn.dropout(net, 0.5)
+            net = tf.nn.dropout(net, keep_prob)
             net = tf.layers.dense(net, len(PROTEIN_LABEL.keys()), None)
 
             self._output = net
