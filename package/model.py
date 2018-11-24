@@ -4,129 +4,22 @@ import logging
 import tensorflow as tf
 import tensorflow_hub as tf_hub
 
-from .common import ConfigurationJson, PathsJson, PROTEIN_LABEL, TFHubModels
+from . import common
 
-class ContainedModel:
-
-    _scope="ExampleScope"
-    _saver = None
-
-    def __init__(self):
-        self._model_dir = os.path.join(
-            PathsJson().MODEL_CHECKPOINT_DIR, self._scope)
-        self._logger = logging.getLogger(self._scope)
-
-    @property
-    def variable_scope(self):
-        return self._scope
-
-    def checkpoint_available(self):
-        ch = tf.train.latest_checkpoint(self._model_dir)
-        return ch is not None
-
-    def load(self, sess: tf.Session):
-        """
-        Loads the saved_model variables. Returns the graph def.
-        Run this AFTER the first predict, and AFTER tf.global_variables_initializer().
-        (Or any other initializer that might overwrite the model variables)
-        """
-
-        self._io(sess, True)
-        return self
-
-    def save(self, sess: tf.Session):
-        """
-        Saves the model variables to the PathsJson's
-        checkpoint folder.
-        """
-        self._io(sess, False)
-
-
-    def _io(self, sess, restore: bool):
-
-        paths = PathsJson()
-        save_path = os.path.join(paths.MODEL_CHECKPOINT_DIR, self._scope, self._scope)
-        
-        if not os.path.exists(os.path.dirname(save_path)):
-            os.makedirs(os.path.dirname(save_path))
-
-        io_fn = self._saver.restore if restore else self._saver.save
-        io_fn(sess, save_path)
-
-    def _load_saver(self):
-
-        var_list = tf.trainable_variables(scope=self.variable_scope)
-        if len(var_list) == 0:
-            self._logger.warning("No variables to save.")
-            return
-        self._saver = tf.train.Saver(var_list=var_list)
-
-class FeatureExractor(ContainedModel):
-
-    _scope = "FeaureExtractor"
-
-    def __init__(self, trainable=False):
-        super().__init__()
-        
-        self.paths = PathsJson()
-        self.config = ConfigurationJson()
-        self.trainable = trainable
-
-        with tf.variable_scope(self._scope):
-            self._module = tf_hub.Module(
-                TFHubModels(self.config.TF_HUB_MODULE).url,
-                trainable=trainable)
-
-    @property
-    def variable_scope(self):
-        return self._scope
-
-    def predict(self, image_tensor: tf.Tensor):
-        """
-        `image_tensor`: A preprocessed float32 4D tensor in [0, 1].
-        """
-
-        with tf.variable_scope(self._scope):
-            out_tensor = self._module(image_tensor, self.trainable)
-        self._load_saver()
-        return out_tensor
-
-    def preprocess(self, image_tensor: tf.Tensor, reshape=False):
-
-        if reshape:
-
-            height, width = tf_hub.get_expected_image_size(self._module)
-
-            # NOTE (bcovas) image_tensor is a 4D tensor [batch, height, widt, channels]
-            image_tensor = tf.image.resize_bilinear(
-                image_tensor, [height, width])
-
-        return image_tensor / 255
-
-class ClassifierModel(ContainedModel):
+class ClassifierModel:
 
     _input = None
     _output = None
     _scope = "ClassifierModel"
 
     def __init__(self, trainable=False):
-        super().__init__()
-
         self._is_training = trainable
-        self.paths = PathsJson()
-        self.config = ConfigurationJson()
-
-        self._module = tf_hub.Module(
-            TFHubModels(self.config.TF_HUB_MODULE).url,
-            trainable=trainable)
 
     def predict(self, feature_tensor: tf.Tensor):
         """
         Returns the classifier logits tensor.
         """ 
-        res = self._model_fn(feature_tensor)
-        self._load_saver()
-        return res
+        return self._model_fn(feature_tensor)
 
     @property
     def input_tensor(self):
@@ -157,11 +50,69 @@ class ClassifierModel(ContainedModel):
             net = tf.nn.dropout(net, keep_prob)
             net = tf.layers.dense(net, 512, tf.nn.relu)
             net = tf.nn.dropout(net, keep_prob)
-            net = tf.layers.dense(net, len(PROTEIN_LABEL.keys()), None)
+            net = tf.layers.dense(net, len(common.PROTEIN_LABEL.keys()), None)
 
             self._output = net
 
         return net
+
+def estimator_model_fn(features, labels, mode):
+
+    config = common.ConfigurationJson()
+    tfmodel = common.TFHubModels(config.TF_HUB_MODULE)
+    trainable = mode != tf.estimator.ModeKeys.EVAL
+
+    module = tf_hub.Module(tfmodel.url, trainable=trainable)
+    features.set_shape((None,) + tfmodel.expected_image_size + (3,))
+    features = tf.to_float(features / 255)
+    img_features = module(features, trainable)
+    logits = ClassifierModel(trainable).predict(img_features)
+    predictions = tf.nn.sigmoid(logits)
+    predictions = tf.cast(predictions > 0.5, tf.float32)
+
+    loss = None
+    if trainable or mode == tf.estimator.ModeKeys.EVAL:
+        loss = tf.nn.sigmoid_cross_entropy_with_logits(
+            logits=logits, labels=tf.to_float(labels))
+        loss = tf.reduce_mean(loss)
+        tf.summary.scalar("Loss", loss)
+
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode,
+            predictions=predictions)
+    if mode == tf.estimator.ModeKeys.EVAL:
+
+        metrics = {
+            "Accuracy": tf.metrics.accuracy(labels, predictions),
+            "FN": tf.metrics.false_negatives(labels, predictions),
+            "FP": tf.metrics.false_positives(labels, predictions)
+        }
+
+        for name, metric in metrics.items():
+            tf.summary.scalar(name, metric[1])
+
+        return tf.estimator.EstimatorSpec(mode,
+            predictions=predictions,
+            eval_metric_ops=metrics,
+            loss=loss)
+
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        metrics = {
+            "Accuracy": tf.metrics.accuracy(labels, predictions)
+        }
+
+        for name, metric in metrics.items():
+            tf.summary.scalar(name, metric[1])
+
+        optimizer = tf.train.AdagradOptimizer(0.0001)
+        optimizer_op = optimizer.minimize(loss, tf.train.get_global_step())
+
+        return tf.estimator.EstimatorSpec(mode,
+            predictions=predictions,
+            loss=loss,
+            train_op=optimizer_op,
+            eval_metric_ops=metrics)
+
 
 class ExportedModel:
 
@@ -169,7 +120,7 @@ class ExportedModel:
     _output_tensor = None
 
     def __init__(self):
-        self.config = ConfigurationJson()
+        self.config = common.ConfigurationJson()
 
     def load(self, sess: tf.Session, input_tensor: tf.Tensor):
 
