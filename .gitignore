@@ -17,4 +17,6 @@ CONFIGURATION.json
 **/*.index
 **/*.meta
 **/*.pb
+**/*.pbtxt
 **/*.data-*
+**/*.tfevents.*
