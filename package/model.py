@@ -155,7 +155,7 @@ class ClassifierModel(ContainedModel):
             net = feature_tensor
 
             net = tf.nn.dropout(net, keep_prob)
-            net = tf.layers.dense(net, 1024, tf.nn.relu)
+            net = tf.layers.dense(net, 512, tf.nn.relu)
             net = tf.nn.dropout(net, keep_prob)
             net = tf.layers.dense(net, len(PROTEIN_LABEL.keys()), None)
 
