@@ -24,8 +24,8 @@ import numpy as np
 import tensorflow_hub as tf_hub
 import tensorflow as tf
 
-from package.model import FeatureExractor
-from package.common import PathsJson, strip_fname_for_id
+from package import model as model_module
+from package import common
 from package import dataset as protein_dataset
 
 tf.logging.set_verbosity(tf.logging.ERROR)
@@ -38,31 +38,28 @@ logger = logging.getLogger("parse_data")
 def single_consumer(
         dataset: protein_dataset.Dataset,
         example_queue: queue.Queue,
+        extract_features: bool,
         paralell_calls: int,
         use_gpu: bool,
-        batch_size: int,
-        save_images: bool):
+        batch_size: int):
 
     # NOTE (bcovas) for some reason passing
     # this class to a process destroys it.
     dataset.reload()
+    tf_hub_module = common.TFHubModels(common.ConfigurationJson().TF_HUB_MODULE)
 
     # pylint: disable=E1129
     tf_graph = tf.Graph()
     with tf_graph.as_default():
 
-        tf_model = FeatureExractor()
-
         def _map_fn(img_id):
-
-            moodel_shape = tf_hub.get_expected_image_size(tf_model._module)
 
             img = protein_dataset.tf_imgid_to_img(
                 img_id, dataset.directory)[:, :, 0:3]
-            img = tf.image.random_crop(img, moodel_shape + [3])
+            img = tf.image.random_crop(img, list(tf_hub_module.expected_image_size) + [3])
             img_bytes = tf.image.encode_png(tf.cast(img, tf.uint8))
 
-            return (img, img_bytes)
+            return (img / 255, img_bytes)
 
         ids_dataset = tf.data.Dataset.from_tensor_slices(
             tf.constant(dataset.img_ids, tf.string))
@@ -71,29 +68,29 @@ def single_consumer(
 
         img_id_dataset = tf.data.Dataset.zip((
             img_dataset, ids_dataset)) \
-            .prefetch(batch_size * 2) \
-            .batch(batch_size)
+            .batch(batch_size) \
+            .prefetch(2)
 
         (img_tensors, img_bytes_tensor), id_tensors \
             = img_id_dataset.make_one_shot_iterator().get_next()
 
-        preprocessed_img_tensors = tf_model.preprocess(img_tensors)
-        features_tensors = tf_model.predict(preprocessed_img_tensors)
+        features_tensors = None
+        if extract_features:
+            features_tensors = tf_hub.Module(tf_hub_module.url)(img_tensors)
 
         sess = tf.Session(config=tf.ConfigProto(
             device_count={'GPU': 0 if not use_gpu else 1}
         ))
 
         sess.run(tf.global_variables_initializer())
+        calls = [id_tensors, img_bytes_tensor]
+
+        if extract_features:
+            calls.append(features_tensors)
+
         while True:
             try:
-                if save_images:
-                    example_queue.put(
-                        sess.run([features_tensors, id_tensors, img_bytes_tensor]))
-                else:
-                    example_queue.put(
-                        sess.run([features_tensors, id_tensors]))
-
+                example_queue.put(sess.run(calls))
             except tf.errors.OutOfRangeError:
                 break
 
@@ -102,8 +99,7 @@ def write(
         example_queue: queue.Queue,
         clean_data_dir: str,
         tfrecord_fname: str,
-        label_dataset: protein_dataset.Dataset,
-        save_images: bool):
+        label_dataset: protein_dataset.Dataset):
 
     logger = logging.getLogger("ExampleWriter")
     label_dataset.reload()
@@ -122,22 +118,18 @@ def write(
 
                 one_hot = np.zeros(
                     [protein_dataset.common.NUM_CLASSES], np.int)
-                img_labels = label_dataset.label(elements[1].decode())
+                img_labels = label_dataset.label(elements[0].decode())
                 img_labels = list(map(int, img_labels))
                 for label in img_labels:
                     one_hot[label] = 1
 
                 serialized_example = protein_dataset.tf_write_single_example(
-                    elements[0], one_hot, elements[1])
+                    elements[0], one_hot, elements[2] if len(elements) == 3 else None)
                 writer.write(serialized_example)
 
-                if save_images:
-
-                    with open(
-                            os.path.join(clean_data_dir,
-                                         elements[1].decode() + ".png"),
-                            "wb") as f:
-                        f.write(elements[2])
+                with open(os.path.join(clean_data_dir,
+                        elements[0].decode() + ".png"), "wb") as f:
+                    f.write(elements[1])
 
                 if i % 100 == 0:
                     logger.info(
@@ -181,8 +173,8 @@ def main(
         clean_data_dir: str,
         tfrecord_path: str,
         paralell_calls: int,
-        gpu: bool, batch_size:
-        int, save_images: bool):
+        extract_features: bool,
+        gpu: bool, batch_size: int):
     """
     Even though, in this case, writing the features to disk 
     barely takes any time at all, I usually separate the 
@@ -193,17 +185,15 @@ def main(
     logger = logging.getLogger("MainImageParser")
     logger.info(f"Using batch_size of {batch_size}")
     logger.info(f"Using {paralell_calls} paralell calls.")
-    if gpu:
-        logger.info("Using GPU.")
+
+    if extract_features:
+        if gpu:
+            logger.info("Using GPU for feature extraction.")
+        else:
+            logger.warn(
+                "Not using GPU. Add the '-h' argument for available options.")
     else:
-        logger.warn(
-            "Not using GPU. Add the '-h' argument for available options.")
-    if save_images:
-        logger.info(
-            "Saving images.")
-    else:
-        logger.warning("Not saving images. " + \
-                       "You will not be able to train the feature extractor.")
+        logger.info("Not extracting features.")
 
     record_dirname = os.path.dirname(tfrecord_path)
 
@@ -215,8 +205,9 @@ def main(
     producer = multiprocessing.Process(
         target=single_consumer, args=(
             dataset, example_queue,
+            extract_features,
             paralell_calls, gpu,
-            batch_size, save_images))
+            batch_size))
 
     producer.start()
 
@@ -225,8 +216,7 @@ def main(
             example_queue,
             clean_data_dir,
             tfrecord_path,
-            dataset,
-            save_images))
+            dataset))
 
     writer.start()
 
@@ -243,8 +233,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Parse the dataset for efficient training.")
 
-    parser.add_argument("--no_images", action="store_false", help="""
-    Don't save parsed images to disk.
+    parser.add_argument("--extract_features", action="store_true", help="""
+    Use the gpu for improved performance. Depends on tensorflow-gpu.
+    Olny used if extracting features.
     """)
     parser.add_argument("--gpu", action="store_true", help="""
     Use the gpu for improved performance. Depends on tensorflow-gpu.
@@ -270,7 +261,7 @@ if __name__ == "__main__":
     Probability of an example ending up in the train record. Defaults to 0.8.
     """)
 
-    pathsJson = PathsJson()
+    pathsJson = common.PathsJson()
 
     train_dataset = protein_dataset.Dataset(
         pathsJson.DIR_TRAIN,
@@ -310,8 +301,9 @@ if __name__ == "__main__":
             train_dataset,
             pathsJson.TRAIN_DATA_CLEAN_PATH,
             pathsJson.TRAIN_FEAURES_RECORD,
-            args.paralell_calls, args.gpu,
-            args.batch_size, args.no_images)
+            args.paralell_calls,
+            args.extract_features,
+            args.gpu, args.batch_size)
 
     if args.parse_predict:
 
@@ -323,8 +315,9 @@ if __name__ == "__main__":
             test_dataset,
             pathsJson.TEST_DATA_CLEAN_PATH,
             pathsJson.PREDICT_FEATURES_RECORD,
-            args.paralell_calls, args.gpu,
-            args.batch_size, args.no_images)
+            args.paralell_calls,
+            args.extract_features,
+            args.gpu, args.batch_size)
 
     splitrecords(
         pathsJson.TRAIN_FEAURES_RECORD,
