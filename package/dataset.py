@@ -186,7 +186,16 @@ def tf_write_single_example(img_features: np.ndarray, labels: [], img_id: str, i
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example.SerializeToString()
 
-def tf_parse_single_example(serialized_example: bytes, load_image_bytes=False):
+def tf_parse_single_example(
+        serialized_example: bytes,
+        keys=None):
+
+    if keys is None:
+        keys = [
+            TFRecordKeys.IMG_FEATURES,
+            TFRecordKeys.LABEL_KEY,
+            TFRecordKeys.ID_KEY,
+        ]
 
     feature = {
         TFRecordKeys.IMG_FEATURES: tf.FixedLenSequenceFeature([], tf.float32,
@@ -196,12 +205,8 @@ def tf_parse_single_example(serialized_example: bytes, load_image_bytes=False):
         TFRecordKeys.ID_KEY: tf.FixedLenFeature([], tf.string)
     }
 
-    if load_image_bytes:
+    if TFRecordKeys.ENCODED_KEY in keys:
         feature[TFRecordKeys.ENCODED_KEY] = tf.FixedLenFeature([], tf.string)
-
     features = tf.parse_single_example(serialized_example, features=feature)
 
-    return (
-        features[TFRecordKeys.IMG_FEATURES],
-        features[TFRecordKeys.LABEL_KEY],
-        features[TFRecordKeys.ID_KEY])
+    return tuple([features[k] for k in keys])
