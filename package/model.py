@@ -32,6 +32,7 @@ class ContainedModel:
         """
 
         self._io(sess, True)
+        return self
 
     def save(self, sess: tf.Session):
         """
@@ -90,13 +91,15 @@ class FeatureExractor(ContainedModel):
         self._load_saver()
         return out_tensor
 
-    def preprocess(self, image_tensor: tf.Tensor):
+    def preprocess(self, image_tensor: tf.Tensor, reshape=False):
 
-        height, width = tf_hub.get_expected_image_size(self._module)
+        if reshape:
 
-        # NOTE (bcovas) image_tensor is a 4D tensor [batch, height, widt, channels]
-        image_tensor = tf.image.resize_bilinear(
-            image_tensor, [height, width])
+            height, width = tf_hub.get_expected_image_size(self._module)
+
+            # NOTE (bcovas) image_tensor is a 4D tensor [batch, height, widt, channels]
+            image_tensor = tf.image.resize_bilinear(
+                image_tensor, [height, width])
 
         return image_tensor / 255
 
@@ -152,7 +155,7 @@ class ClassifierModel(ContainedModel):
             net = feature_tensor
 
             net = tf.nn.dropout(net, keep_prob)
-            net = tf.layers.dense(net, 512, tf.nn.relu)
+            net = tf.layers.dense(net, 1024, tf.nn.relu)
             net = tf.nn.dropout(net, keep_prob)
             net = tf.layers.dense(net, len(PROTEIN_LABEL.keys()), None)
 
