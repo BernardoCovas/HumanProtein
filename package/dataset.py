@@ -5,7 +5,6 @@ import threading
 import json
 import zipfile
 
-import wget
 import tensorflow as tf
 import numpy as np
 
@@ -172,16 +171,15 @@ def _bytes_feature(value):
         value = value.encode()
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
-def tf_write_single_example(img_features: np.ndarray, labels: [], img_id: str, image_bytes=None):
+def tf_write_single_example(img_id: str, labels: [], img_features: np.ndarray):
 
     feature = {
         TFRecordKeys.LABEL_KEY: _int64_feature(labels),
-        TFRecordKeys.ID_KEY: _bytes_feature(img_id),
-        TFRecordKeys.IMG_FEATURES: _float_feature(img_features)
+        TFRecordKeys.ID_KEY: _bytes_feature(img_id)
     }
 
-    if image_bytes is not None:
-        feature[TFRecordKeys.ENCODED_KEY] = _bytes_feature(image_bytes),
+    if img_features  is not None:
+        feature[TFRecordKeys.IMG_FEATURES] = _float_feature(img_features)
 
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example.SerializeToString()
