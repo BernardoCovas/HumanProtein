@@ -44,7 +44,7 @@ def single_consumer(
         save_images: bool):
 
     # NOTE (bcovas) for some reason passing
-    # this class to a process destroys it. 
+    # this class to a process destroys it.
     dataset.reload()
 
     # pylint: disable=E1129
@@ -53,20 +53,29 @@ def single_consumer(
 
         tf_model = FeatureExractor()
 
+        def _map_fn(img_id):
+
+            moodel_shape = tf_hub.get_expected_image_size(tf_model._module)
+
+            img = protein_dataset.tf_imgid_to_img(
+                img_id, dataset.directory)[:, :, 0:3]
+            img = tf.image.random_crop(img, moodel_shape + [3])
+            img_bytes = tf.image.encode_png(tf.cast(img, tf.uint8))
+
+            return (img, img_bytes)
+
         ids_dataset = tf.data.Dataset.from_tensor_slices(
             tf.constant(dataset.img_ids, tf.string))
         img_dataset = ids_dataset.map(
-            lambda x: protein_dataset.tf_imgid_to_img(x, dataset.directory)[:, :, 0:3],
-            paralell_calls)
-        img_bytes_dataset = img_dataset.map(
-            tf.image.encode_png, paralell_calls)
+            _map_fn, paralell_calls)
 
         img_id_dataset = tf.data.Dataset.zip((
-            img_dataset, ids_dataset, img_bytes_dataset)) \
+            img_dataset, ids_dataset)) \
             .prefetch(batch_size * 2) \
             .batch(batch_size)
 
-        img_tensors, id_tensors, img_bytes_tensor = img_id_dataset.make_one_shot_iterator().get_next()
+        (img_tensors, img_bytes_tensor), id_tensors \
+            = img_id_dataset.make_one_shot_iterator().get_next()
 
         preprocessed_img_tensors = tf_model.preprocess(img_tensors)
         features_tensors = tf_model.predict(preprocessed_img_tensors)
@@ -87,6 +96,7 @@ def single_consumer(
 
             except tf.errors.OutOfRangeError:
                 break
+
 
 def write(
         example_queue: queue.Queue,
@@ -110,7 +120,8 @@ def write(
 
             for elements in zip(*example):
 
-                one_hot = np.zeros([protein_dataset.common.NUM_CLASSES], np.int)
+                one_hot = np.zeros(
+                    [protein_dataset.common.NUM_CLASSES], np.int)
                 img_labels = label_dataset.label(elements[1].decode())
                 img_labels = list(map(int, img_labels))
                 for label in img_labels:
@@ -123,7 +134,8 @@ def write(
                 if save_images:
 
                     with open(
-                            os.path.join(clean_data_dir, elements[1].decode() + ".png"),
+                            os.path.join(clean_data_dir,
+                                         elements[1].decode() + ".png"),
                             "wb") as f:
                         f.write(elements[2])
 
@@ -132,6 +144,7 @@ def write(
                         f"Wrote {i} examples of {num_examples}")
                 i += 1
     logger.info(f"Done. Wrote {i} examples.")
+
 
 def splitrecords(record: str, train_record: str, test_record: str, train_proba: float):
 
@@ -144,7 +157,7 @@ def splitrecords(record: str, train_record: str, test_record: str, train_proba: 
     n_train = 0
 
     logger.info(f"Spliting at {train_proba}...")
-    
+
     for record_str in tf.python_io.tf_record_iterator(record):
 
         if random.random() > train_proba:
@@ -190,7 +203,7 @@ def main(
             "Saving images.")
     else:
         logger.warning("Not saving images. " + \
-            "You will not be able to train the feature extractor.")
+                       "You will not be able to train the feature extractor.")
 
     record_dirname = os.path.dirname(tfrecord_path)
 
@@ -289,7 +302,7 @@ if __name__ == "__main__":
     if args.parse_train:
 
         if not os.path.exists(pathsJson.TRAIN_DATA_CLEAN_PATH):
-                os.makedirs(pathsJson.TRAIN_DATA_CLEAN_PATH)
+            os.makedirs(pathsJson.TRAIN_DATA_CLEAN_PATH)
 
         logger.info(f"Writing {pathsJson.TRAIN_FEAURES_RECORD}...")
 
