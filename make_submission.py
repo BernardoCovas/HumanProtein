@@ -128,6 +128,15 @@ if __name__ == "__main__":
     or use only the classifier on cached image features.
     """)
     argparser.add_argument(
+        "--batch", type=int, default=10, help=f"""
+    Batch size to use. Defaults to 10.
+    """)
+    argparser.add_argument(
+        "--paralell", type=int, default=1, help=f"""
+    Paralell calls for image decoding/feature reader.
+    Defauts to 1.
+    """)
+    argparser.add_argument(
         "--feature_record", help=f"""
     What feature_record to use. Defaults to predict. {list(records.keys())}
     """)
@@ -163,7 +172,7 @@ if __name__ == "__main__":
 
     producer = multiprocessing.Process(
         target=run_prediction, args=(
-            queue, record, 100, 16))
+            queue, record, args.batch, args.paralell))
 
     consumer = multiprocessing.Process(
         target=make_submission,
