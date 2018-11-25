@@ -34,11 +34,6 @@ class ClassifierModel:
             feature_tensor: tf.Tensor,
         ):
 
-        if self._is_training:
-            keep_prob = 0.5
-        else:
-            keep_prob = 1
-
         with tf.variable_scope(self._scope):
 
             self._input = feature_tensor
@@ -47,9 +42,7 @@ class ClassifierModel:
             # I fell for this one already.
             net = feature_tensor
 
-            net = tf.nn.dropout(net, keep_prob)
             net = tf.layers.dense(net, 512, tf.nn.relu)
-            net = tf.nn.dropout(net, keep_prob)
             net = tf.layers.dense(net, len(common.PROTEIN_LABEL.keys()), None)
 
             self._output = net
@@ -62,7 +55,8 @@ def estimator_model_fn(features, labels, mode):
     tfmodel = common.TFHubModels(config.TF_HUB_MODULE)
     trainable = mode != tf.estimator.ModeKeys.EVAL
 
-    module = tf_hub.Module(tfmodel.url, trainable=trainable)
+    module = tf_hub.Module(tfmodel.url, trainable=trainable,
+        tags={"train"} if trainable else None)
     features.set_shape((None,) + tfmodel.expected_image_size + (3,))
     features = tf.to_float(features / 255)
     img_features = module(features, trainable)
@@ -104,7 +98,7 @@ def estimator_model_fn(features, labels, mode):
         for name, metric in metrics.items():
             tf.summary.scalar(name, metric[1])
 
-        optimizer = tf.train.AdagradOptimizer(0.0001)
+        optimizer = tf.train.AdagradOptimizer(0.01)
         optimizer_op = optimizer.minimize(loss, tf.train.get_global_step())
 
         return tf.estimator.EstimatorSpec(mode,
