@@ -21,8 +21,7 @@ import multiprocessing
 import tensorflow as tf
 import numpy as np
 
-from package.model import ClassifierModel
-from package import common, dataset as protein_dataset
+from package import common, dataset as protein_dataset, model as model_module
 
 def run_prediction(
         pred_queue,
@@ -30,33 +29,28 @@ def run_prediction(
         batch_size: int,
         paralell_calls: int):
 
-    # pylint: disable=E1129
+
     with tf.Graph().as_default():
         sess = tf.Session()
 
-        model = ClassifierModel()
-        model_config = common.TFHubModels(
-            common.ConfigurationJson().TF_HUB_MODULE)
-
         dataset = tf.data.TFRecordDataset(tfrecord_name) \
-            .map(protein_dataset.tf_parse_single_example) \
+            .map(lambda x: protein_dataset.tf_parse_single_example(x, [
+                protein_dataset.TFRecordKeys.ID_KEY,
+                protein_dataset.TFRecordKeys.IMG_PATHS_KEY,
+            ])) \
             .batch(batch_size) \
             .prefetch(2)
 
-        features_tensor, labels_tensor, id_tensor = dataset.make_one_shot_iterator().get_next()
-        features_tensor.set_shape([None, model_config.feature_vector_size])
-        logits_tensor = model.predict(features_tensor)
-        prediction_tensor = tf.sigmoid(logits_tensor)
+        img_id_tensor, paths_tensor = dataset.make_one_shot_iterator().get_next()
 
-        model.load(sess)
+        model = model_module.ExportedModel()
+        pred_tensor = model.load(sess, paths_tensor)
 
         while True:
             try:
-                preds, img_ids = sess.run([prediction_tensor, id_tensor])
-                pred_queue.put((preds, img_ids))
-
+                pred_queue.put(sess.run([img_id_tensor, pred_tensor]))
             except tf.errors.OutOfRangeError:
-                return
+                pred_queue.put(None)
 
 def make_submission(queue, submission_fname: str):
 
@@ -67,22 +61,19 @@ def make_submission(queue, submission_fname: str):
 
     while True:
 
-        preds_img_ids = queue.get()
+        preds = queue.get()
 
-        if preds_img_ids is None:
+        if preds is None:
             break
 
-        preds, img_ids = preds_img_ids
-
-        for pred, img_id in list(zip(preds, img_ids)):
-
-            pred_bool = pred > 0.5
-            label = common.one_hot_to_label(pred_bool)
-
-            if len(label) == 0:
-                label = [str(np.argmax(pred))]
+        for img_id, scores in list(zip(*preds)):
 
             img_id = img_id.decode()
+            scores = (scores > 0.5).astype(np.int)
+            label = common.one_hot_to_label(scores)
+
+            if len(label) == 0:
+                label = [str(np.argmax(scores))]
 
             submission.add_submission(img_id, label)
             logger.info(f"{img_id} -> {label}")
