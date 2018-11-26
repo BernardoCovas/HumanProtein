@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 
 import numpy as np
 
@@ -130,10 +131,6 @@ class ConfigurationJson:
     _config_data = {}
 
     def __init__(self):
-        
-        import os
-        import logging
-        import json
 
         self._logger = logging.getLogger("ConfigJsonClass")
 
@@ -194,10 +191,6 @@ class PathsJson:
 
     def __init__(self):
 
-        import os
-        import logging
-        import json
-
         self._logger = logging.getLogger("PathsJsonClass")
         
         if not os.path.exists(self.PATHS_JSON_FNAME):
@@ -207,11 +200,18 @@ class PathsJson:
             
             with open(self.PATHS_JSON_FNAME, "w") as json_file:
                 json.dump(self.EXAMPLE_PATHS_JSON, json_file, indent=2)
-
-            raise FileNotFoundError("No PATHS.json found.")
+            exit(1)
 
         with open(self.PATHS_JSON_FNAME) as json_file:
             self._path_config = json.load(json_file)
+
+        for path in [
+                        self.RAW_DATA_DIR,
+                        self.TRAIN_DATA_CLEAN_PATH,
+                        self.TEST_DATA_CLEAN_PATH
+                    ]:
+            if not os.path.exists(path) or len(os.listdir(path)) == 0:
+                self._logger.warning(f"'{path}' is empty. Did you parse the data?")
 
     @property
     def RAW_DATA_DIR(self):
