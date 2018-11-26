@@ -5,10 +5,10 @@ import threading
 import json
 import zipfile
 
+from typing import List
+
 import tensorflow as tf
 import numpy as np
-
-from . import common
 
 class Dataset:
     """
@@ -22,7 +22,6 @@ class Dataset:
     """
 
     FILTER_LIST = ["red", "green", "blue", "yellow"]
-    _data = {}
 
     def __init__(self, dirname: str, csv_file: str):
         """
@@ -30,6 +29,7 @@ class Dataset:
         `csv_file`: The associated csv file with ids and labels.
         """
 
+        self._data = {}
         self._dirname = dirname
         self._csv_file = csv_file
         self.reload()
@@ -64,7 +64,7 @@ class Dataset:
                 img_labels = label.split(" ")
                 self._data[img_id] = img_labels
 
-    def get_img_path(self, img_id: str) -> list:
+    def get_img_paths(self, img_id: str) -> list:
 
         if self._data.get(img_id) is None:
             raise ValueError(f"{img_id} does not exist in this dataset.")
@@ -82,7 +82,7 @@ class Dataset:
 
         for img_id in self._data.keys():
 
-            paths = self.get_img_path(img_id)
+            paths = self.get_img_paths(img_id)
             for path in paths:
                 if not os.path.exists(path):
                     return False
@@ -107,10 +107,33 @@ class PreProcessedDataset(Dataset):
 
 class TFRecordKeys:
 
-    LABEL_KEY = "image/labels"
-    ENCODED_KEY = "image/encoded"
     ID_KEY = "image/id"
+    LABEL_KEY = "image/labels"
+    IMG_PATHS_KEY = "image/paths"
+    ENCODED_KEY = "image/encoded"
+    DECODED_KEY = "image/decoded"
     IMG_FEATURES = "image/features"
+
+    KEYMAP = {
+        ID_KEY: tf.FixedLenFeature([], tf.string),
+        ENCODED_KEY: tf.FixedLenFeature([], tf.string),
+        LABEL_KEY: tf.FixedLenSequenceFeature([], tf.int64, allow_missing=True),
+        IMG_PATHS_KEY: tf.FixedLenSequenceFeature([], tf.string, allow_missing=True),
+        IMG_FEATURES: tf.FixedLenSequenceFeature([], tf.float32, allow_missing=True)
+    }
+
+def tf_load_clean_image():
+    pass
+
+def tf_load_image(paths: tf.Tensor):
+
+    channels = []
+    for i in range(4):
+        img_bytes = tf.read_file(paths[i])
+        img = tf.image.decode_image(img_bytes)
+        channels.append(tf.squeeze(img))
+
+    return tf.stack(channels)
 
 def tf_imgid_to_img(img_id: str, dirname: str):
     """
@@ -160,26 +183,18 @@ def tf_preprocessed_directory_dataset(dirname: str, paralell_readers=None):
 
     return tf.data.Dataset.zip((img_dataset, fname_dataset))
 
-def _int64_feature(value_list):
-  return tf.train.Feature(int64_list=tf.train.Int64List(value=value_list))
 
-def _float_feature(value):
-    return tf.train.Feature(float_list=tf.train.FloatList(value=value))
-
-def _bytes_feature(value):
-    if type(value) == str:
-        value = value.encode()
-    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
-
-def tf_write_single_example(img_id: str, labels: [], img_features: np.ndarray):
+def tf_write_single_example(
+    img_id: str, labels: [],
+    img_paths : [],
+    img_features: np.ndarray):
 
     feature = {
         TFRecordKeys.LABEL_KEY: _int64_feature(labels),
-        TFRecordKeys.ID_KEY: _bytes_feature(img_id)
+        TFRecordKeys.ID_KEY: _bytes_feature(img_id),
+        TFRecordKeys.IMG_PATHS_KEY: _bytes_feature(img_paths),
+        TFRecordKeys.IMG_FEATURES: _float_feature(img_features),
     }
-
-    if img_features  is not None:
-        feature[TFRecordKeys.IMG_FEATURES] = _float_feature(img_features)
 
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example.SerializeToString()
@@ -190,21 +205,35 @@ def tf_parse_single_example(
 
     if keys is None:
         keys = [
-            TFRecordKeys.IMG_FEATURES,
             TFRecordKeys.LABEL_KEY,
             TFRecordKeys.ID_KEY,
         ]
 
-    feature = {
-        TFRecordKeys.IMG_FEATURES: tf.FixedLenSequenceFeature([], tf.float32,
-            allow_missing=True),
-        TFRecordKeys.LABEL_KEY: tf.FixedLenSequenceFeature([], tf.int64,
-            allow_missing=True),
-        TFRecordKeys.ID_KEY: tf.FixedLenFeature([], tf.string)
-    }
+    feature = {}
+    for key in keys:
+        feature[key] = TFRecordKeys.KEYMAP[key]
 
-    if TFRecordKeys.ENCODED_KEY in keys:
-        feature[TFRecordKeys.ENCODED_KEY] = tf.FixedLenFeature([], tf.string)
     features = tf.parse_single_example(serialized_example, features=feature)
 
     return tuple([features[k] for k in keys])
+
+def _int64_feature(value_list):
+    if value_list is None:
+        value_list = []
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=value_list))
+
+def _float_feature(value):
+    if value is None:
+        value = []
+    return tf.train.Feature(float_list=tf.train.FloatList(value=value))
+
+def _bytes_feature(value):
+
+    if value is None:
+        value = []
+    if isinstance(value, str):
+        value = value.encode()
+    if not isinstance(value, list):
+        value = [value]
+
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=value))
