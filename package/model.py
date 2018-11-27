@@ -132,7 +132,8 @@ def estimator_model_fn(features, labels, mode):
 
         for name, metric in metrics.items():
             tf.summary.scalar(name, metric[1])
-        tf.summary.image("ExampleImage", img_tensor, 8)
+        if not head_only:
+            tf.summary.image("ExampleImage", img_tensor, 8)
 
         return tf.estimator.EstimatorSpec(mode,
             predictions=predictions,
