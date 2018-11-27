@@ -30,46 +30,43 @@ from package import common
 from package import dataset as protein_dataset
 
 tf.logging.set_verbosity(tf.logging.ERROR)
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("parse_data")
 
 
-def _tfgraph(
-        dataset: protein_dataset.Dataset,
-        extract_features: bool,
+def _input_function(
+        img_id_paths_dict: dict,
         batch_size: int,
         paralell_map_calls: int):
 
-    def _map_fn(img_id):
+    tf_hub_module = common.TFHubModels(common.ConfigurationJson().TF_HUB_MODULE)
 
-        img = protein_dataset.tf_imgid_to_img(
-            img_id, dataset.directory)[:, :, 0:3]
-        img = tf.image.random_crop(img, list(tf_hub_module.expected_image_size) + [3])
-        img_bytes = tf.image.encode_png(tf.cast(img, tf.uint8))
+    def gen():
 
-        return (img / 255, img_bytes)
+        for img_id, paths in img_id_paths_dict.items():
+            yield img_id, paths
 
-    ids_dataset = tf.data.Dataset.from_tensor_slices(
-        tf.constant(dataset.img_ids, tf.string))
-    img_dataset = ids_dataset.map(
-        _map_fn, paralell_map_calls)
+    def _map_fn(img_id, paths):
 
-    img_id_dataset = tf.data.Dataset.zip((
-        img_dataset, ids_dataset)) \
+        img = protein_dataset.tf_load_image(paths)[:, :, 0:3]
+        img = tf.image.random_crop(img, tf_hub_module.expected_image_size + (3,))
+        img_bytes = tf.image.encode_png(img)
+        img = tf.to_float(img)
+
+        return(img_id, img / 255, img_bytes)
+
+    ids_dataset = tf.data.Dataset.from_generator(gen, (tf.string, tf.string), ([], [None]))
+    img_dataset = ids_dataset.map(_map_fn, paralell_map_calls)
+
+    img_id_dataset = img_dataset \
         .batch(batch_size) \
-        .prefetch(2)
+        .prefetch(None)
 
-    (img_tensors, img_bytes_tensor), id_tensors \
+    id_tensor, img_tensor, img_bytes_tensor \
         = img_id_dataset.make_one_shot_iterator().get_next()
+    features_tensors = tf_hub.Module(tf_hub_module.url)(img_tensor)
 
-    features_tensors = None
-    if extract_features:
-        tf_hub_module = common.TFHubModels(common.ConfigurationJson().TF_HUB_MODULE)
-        features_tensors = tf_hub.Module(tf_hub_module.url)(img_tensors)
-
-    return (img_bytes_tensor, id_tensors, features_tensors)
+    return (id_tensor, img_bytes_tensor, features_tensors)
 
 def single_consumer(
         dataset: protein_dataset.Dataset,
@@ -79,18 +76,13 @@ def single_consumer(
         use_gpu: bool,
         batch_size: int):
 
-    # NOTE (bcovas) for some reason passing
-    # this class to a process destroys it.
+    # NOTE (bcovas) Passing this class
+    # to a process seems destroys it.
     dataset.reload()
 
-
     with tf.Graph().as_default():
-        img_bytes_tensors, id_tensors, features_tensors = \
-            _tfgraph(
-                dataset,
-                extract_features,
-                batch_size,
-                paralell_calls)
+        id_tensors, img_bytes_tensors, features_tensors = \
+            _input_function(dataset.img_id_and_paths, batch_size, paralell_calls)
 
         sess = tf.Session(config=tf.ConfigProto(
             device_count={'GPU': 0 if not use_gpu else 1}
@@ -130,23 +122,22 @@ def write(
 
             for elements in zip(*example):
 
-                one_hot = np.zeros(
-                    [common.NUM_CLASSES], np.int)
-                img_labels = label_dataset.label(elements[0].decode())
-                img_labels = list(map(int, img_labels))
-                for label in img_labels:
-                    one_hot[label] = 1
+                img_id = elements[0].decode()
+                img_bytes = elements[1]
+                img_features = elements[2] if len(elements) == 3 else None
+
+                label_vector = label_dataset.label_vector(img_id)
+                paths = label_dataset.get_img_paths(img_id)
+                paths = [p.encode() for p in paths]
 
                 serialized_example = protein_dataset.tf_write_single_example(
-                    elements[0], one_hot,
-                    elements[2] if len(elements) == 3 else None,
-                    None)
+                    img_id, label_vector, paths, img_features)
 
                 writer.write(serialized_example)
 
                 with open(os.path.join(clean_data_dir,
-                        elements[0].decode() + ".png"), "wb") as f:
-                    f.write(elements[1])
+                        img_id + ".png"), "wb") as f:
+                    f.write(img_bytes)
 
                 if i % 100 == 0:
                     logger.info(
@@ -258,15 +249,9 @@ def main(
 
             img_paths = dataset.get_img_paths(img_id)
             img_paths = list(map(lambda x: x.encode(), img_paths))
-
-            one_hot = np.zeros(
-                    [common.NUM_CLASSES], np.int)
-            img_labels = dataset.label(img_id)
-            img_labels = list(map(int, img_labels))
-            for label in img_labels:
-                one_hot[label] = 1
-
-            example = protein_dataset.tf_write_single_example(img_id, one_hot, img_paths, None)
+            label_vector = dataset.label_vector(img_id)
+            example = protein_dataset.tf_write_single_example(
+                img_id, label_vector, img_paths, None)
             writer.write(example)
 
             if i % 1000 == 0:
