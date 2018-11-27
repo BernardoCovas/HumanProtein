@@ -21,65 +21,75 @@ import multiprocessing
 import tensorflow as tf
 import numpy as np
 
-from package import common, dataset as protein_dataset, model as model_module
+from package import common, dataset as dataset_module, model as model_module
 
-def run_prediction(
-        pred_queue,
+
+def make_submission(
         tfrecord_name: str,
+        submission_fname: str,
         batch_size: int,
         paralell_calls: int):
 
+    config = common.TFHubModels(common.ConfigurationJson().TF_HUB_MODULE)
 
-    with tf.Graph().as_default():
-        sess = tf.Session()
+    def _inp_fn():
+
+        def map_fn(example):
+
+            features = dataset_module.tf_parse_single_example(example, [
+                dataset_module.TFRecordKeys.ID,
+                dataset_module.TFRecordKeys.IMG_PATHS
+            ])
+
+            img_id = features[dataset_module.TFRecordKeys.ID]
+            paths = features[dataset_module.TFRecordKeys.IMG_PATHS]
+
+            img = dataset_module.tf_load_image(paths)[:, :, 0:3]
+            img = tf.to_float(img) / 255
+            img = tf.image.random_crop(img, config.expected_image_size + (3,))
+
+            return {
+                dataset_module.TFRecordKeys.ID: img_id,
+                dataset_module.TFRecordKeys.DECODED: img
+            }
 
         dataset = tf.data.TFRecordDataset(tfrecord_name) \
-            .map(lambda x: protein_dataset.tf_parse_single_example(x, [
-                protein_dataset.TFRecordKeys.ID_KEY,
-                protein_dataset.TFRecordKeys.IMG_PATHS_KEY,
-            ])) \
+            .map(map_fn, paralell_calls) \
             .batch(batch_size) \
             .prefetch(2)
 
-        img_id_tensor, paths_tensor = dataset.make_one_shot_iterator().get_next()
+        return dataset
 
-        model = model_module.ExportedModel()
-        pred_tensor = model.load(sess, paths_tensor)
-
-        while True:
-            try:
-                pred_queue.put(sess.run([img_id_tensor, pred_tensor]))
-            except tf.errors.OutOfRangeError:
-                pred_queue.put(None)
-
-def make_submission(queue, submission_fname: str):
-
-    logging.basicConfig(level=logging.INFO)
-
-    submission = common.Submission(submission_fname)
     logger = logging.getLogger("Submittor")
+    submission = common.Submission(submission_fname)
 
-    while True:
+    estimator = model_module.ProteinEstimator()
+    wanted_predictions = [
+        model_module.ProteinEstimator.IMAGE_ID,
+        model_module.ProteinEstimator.SCORES
+    ]
 
-        preds = queue.get()
+    tf.logging.set_verbosity(tf.logging.INFO)
+    for i, predictions in enumerate(
+        estimator.predict(_inp_fn, wanted_predictions)):
+        i += 1
 
-        if preds is None:
-            break
+        scores = predictions[model_module.ProteinEstimator.SCORES]
+        img_id = predictions[model_module.ProteinEstimator.IMAGE_ID]
 
-        for img_id, scores in list(zip(*preds)):
+        img_id = img_id.decode()
+        scores = (scores > 0.5).astype(np.int)
+        label = common.one_hot_to_label(scores)
 
-            img_id = img_id.decode()
-            scores = (scores > 0.5).astype(np.int)
-            label = common.one_hot_to_label(scores)
+        if len(label) == 0:
+            label = [str(np.argmax(scores))]
 
-            if len(label) == 0:
-                label = [str(np.argmax(scores))]
-
-            submission.add_submission(img_id, label)
-            logger.info(f"{img_id} -> {label}")
+        submission.add_submission(img_id, label)
+        if i % 100 == 0:
+            logger.info(f"Wrote {i} examples.")
 
     submission.end_sumbission()
-    logger.info("Done")
+    logger.info(f"Finished, Wrote {i} examples.")
 
 def validate_sumbission(sample_subfile: str, subfile: str):
 
@@ -114,18 +124,13 @@ if __name__ == "__main__":
 
     argparser = argparse.ArgumentParser()
     argparser.add_argument(
-        "--use_full_model", action="store_true", help=f"""
-    Use the full model and consume a directory,
-    or use only the classifier on cached image features.
-    """)
-    argparser.add_argument(
-        "--batch", type=int, default=10, help=f"""
+        "--batch_size", type=int, default=10, help=f"""
     Batch size to use. Defaults to 10.
     """)
     argparser.add_argument(
-        "--paralell", type=int, default=1, help=f"""
+        "--paralell_calls", type=int, default=1, help=f"""
     Paralell calls for image decoding/feature reader.
-    Defauts to 1.
+    Defauts to 1 (Sequential).
     """)
     argparser.add_argument(
         "--feature_record", help=f"""
@@ -148,6 +153,9 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("MakeSubmission")
+    tflogger = logging.getLogger("tensorflow")
+    tf.logging.set_verbosity(tf.logging.WARN)
+    tflogger.propagate = False
 
     record = records.get(args.feature_record)
     if record is None:
@@ -159,24 +167,13 @@ if __name__ == "__main__":
 
     sub_file = os.path.join(paths.SUBMISSION_DIR, args.submission_name)
 
-    queue = multiprocessing.Queue(10)
-
-    producer = multiprocessing.Process(
-        target=run_prediction, args=(
-            queue, record, args.batch, args.paralell))
-
-    consumer = multiprocessing.Process(
-        target=make_submission,
-        args=(queue, sub_file))
-
     init = time.time()
 
-    producer.start()
-    consumer.start()
-
-    producer.join()
-    queue.put(None)
-    consumer.join()
+    make_submission(
+        record,
+        sub_file,
+        args.batch_size,
+        args.paralell_calls)
 
     if args.validate:
         if args.feature_record == "predict":
