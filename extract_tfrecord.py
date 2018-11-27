@@ -26,12 +26,15 @@ def main(tfrecord_path: str):
         dataset = tf.data.TFRecordDataset(tfrecord_path)
         dataset = dataset.map(lambda x: dataset_module.tf_parse_single_example(
             x, keys=[
-                dataset_module.TFRecordKeys.ID_KEY, 
-                dataset_module.TFRecordKeys.LABEL_KEY,
-                dataset_module.TFRecordKeys.IMG_PATHS_KEY]), 2)
-        dataset = dataset.prefetch(10)
+                dataset_module.TFRecordKeys.ID,
+                dataset_module.TFRecordKeys.LABEL,
+                dataset_module.TFRecordKeys.IMG_PATHS]), 2)
+        dataset = dataset.prefetch(None)
 
-        img_id_tensor, label_tensor, img_paths_tensor = dataset.make_one_shot_iterator().get_next()
+        features = dataset.make_one_shot_iterator().get_next()
+        img_id_tensor = features[dataset_module.TFRecordKeys.ID]
+        label_tensor = features[dataset_module.TFRecordKeys.LABEL]
+        img_paths_tensor = features[dataset_module.TFRecordKeys.IMG_PATHS]
 
         sess = tf.Session()
         n = 0
