@@ -80,6 +80,7 @@ def single_consumer(
     # to a process seems destroys it.
     dataset.reload()
 
+    # pylint: disable=E1129
     with tf.Graph().as_default():
         id_tensors, img_bytes_tensors, features_tensors = \
             _input_function(dataset.img_id_and_paths, batch_size, paralell_calls)
