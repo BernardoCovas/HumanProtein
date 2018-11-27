@@ -11,38 +11,6 @@ import numpy as np
 
 from package import common, dataset as dataset_module, model as model_module
 
-def export_model(dirname: str):
-
-    logger = logging.getLogger("Exporter")
-    logger.info(f"Exporting to {dirname}")
-
-    tflogger = logging.getLogger("tensorflow")
-    tflogger.propagate = False
-    tflogger.setLevel(logging.INFO)
-
-    estimator = tf.estimator.Estimator(
-        model_fn=model_module.estimator_model_fn,
-        model_dir=paths.MODEL_CHECKPOINT_DIR,
-        config=None
-    )
-
-    def _inp_fn():
-
-        img_paths = tf.placeholder(tf.string, [None, 4], name="input")
-        imgs = tf.map_fn(lambda x: dataset_module.tf_load_image(x)[:, :, 0:3], img_paths, tf.uint8, 4)
-
-        receiver = tf.estimator.export.ServingInputReceiver(
-            {
-                dataset_module.TFRecordKeys.DECODED_KEY: imgs
-            },
-            {
-                "input": img_paths
-            })
-
-        return receiver
-
-    estimator.export_saved_model(dirname, _inp_fn)
-
 def train(
         clean: bool,
         epochs: int,
@@ -54,7 +22,6 @@ def train(
     logger = logging.getLogger("trainer")
     logger.setLevel(logging.INFO)
 
-    paths = common.PathsJson()
     config_json = common.ConfigurationJson()
     model_config = common.TFHubModels(config_json.TF_HUB_MODULE)
 
@@ -76,45 +43,37 @@ def train(
 
         def _map_fn(example):
             
-            img_id, label = dataset_module.tf_parse_single_example(
+            features = dataset_module.tf_parse_single_example(
                 example,
                 [
-                    dataset_module.TFRecordKeys.ID_KEY,
-                    dataset_module.TFRecordKeys.LABEL_KEY,
+                    dataset_module.TFRecordKeys.ID,
+                    dataset_module.TFRecordKeys.LABEL,
+                    dataset_module.TFRecordKeys.IMG_PATHS
                 ])
 
-            if clean:
-                data_path = os.path.normpath(paths.TRAIN_DATA_CLEAN_PATH)
-                img = dataset_module.tf_imgid_to_img_clean(
-                    img_id, data_path)
-                return img, label
+            img_id = features[dataset_module.TFRecordKeys.ID]
+            label = features[dataset_module.TFRecordKeys.LABEL]
+            paths = features[dataset_module.TFRecordKeys.IMG_PATHS]
 
-            data_path = os.path.normpath(paths.DIR_TRAIN)
-            img = dataset_module.tf_imgid_to_img(
-                img_id, data_path)[:, :, 0:3]
+            img = dataset_module.tf_load_image(paths)[:, :, 0:3]
+            img = tf.random_crop(img, model_config.expected_image_size + (3,))
+            img = img / 255
 
-            img = tf.image.resize_bilinear([img], model_config.expected_image_size)[0]
+            return {
+                dataset_module.TFRecordKeys.ID: img_id,
+                dataset_module.TFRecordKeys.DECODED: img,
+            }, label
 
-            return {dataset_module.TFRecordKeys.DECODED_KEY: img}, label
+        features_label = dataset.apply(tf.data.experimental.map_and_batch(_map_fn, batch_size, os.cpu_count() + 1)).prefetch(None)
 
-
-        img_label = dataset.map(
-            _map_fn, os.cpu_count() + 1) \
-            .batch(batch_size) \
-            .apply(tf.data.experimental.prefetch_to_device("gpu:0", 1))
-
-        return img_label
+        return features_label
 
     # NOTE (bcovas) MirroredStrategy seems to be failing
     # on windows. Fails with no errors.
-    strategy = tf_contrib.distribute.MirroredStrategy(num_gpus=1)
+    strategy = tf_contrib.distribute.ParameterServerStrategy(num_gpus_per_worker=1)
     config = tf.estimator.RunConfig(train_distribute=strategy)
 
-    estimator = tf.estimator.Estimator(
-        model_fn=model_module.estimator_model_fn,
-        model_dir=paths.MODEL_CHECKPOINT_DIR,
-        config=None
-    )
+    estimator = model_module.ProteinEstimator(config=None)
 
     train_spec = tf.estimator.TrainSpec(
         lambda: _inp_fn(False), 
@@ -147,7 +106,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Train the model on parsed data.")
 
-    parser.add_argument("--overwrite", action="store_true", help="""
+    parser.add_argument("--override", action="store_true", help="""
     Overwrite an existing saved_model directory.
     """)
     parser.add_argument("--export_only", action="store_true", help="""
@@ -182,9 +141,9 @@ if __name__ == "__main__":
 
     dirnames = [paths.MODEL_CHECKPOINT_DIR, args.export_dir]
 
-    if args.overwrite:
+    if args.override:
         for dirname in dirnames:
-            logger.warning(f"Overwriting: {dirname}")
+            logger.warning(f"Overriding: {dirname}")
             shutil.rmtree(dirname, True)
 
     for dirname in dirnames:
@@ -202,5 +161,3 @@ if __name__ == "__main__":
             args.train_record,
             args.eval_record,
             args.eval_steps)
-
-    export_model(args.export_dir)
