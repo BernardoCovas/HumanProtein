@@ -132,6 +132,7 @@ def estimator_model_fn(features, labels, mode):
 
         for name, metric in metrics.items():
             tf.summary.scalar(name, metric[1])
+        tf.summary.image("ExampleImage", img_tensor, 8)
 
         return tf.estimator.EstimatorSpec(mode,
             predictions=predictions,
@@ -146,6 +147,7 @@ def estimator_model_fn(features, labels, mode):
 
         for name, metric in metrics.items():
             tf.summary.scalar(name, metric[1])
+
 
         optimizer = tf.train.AdadeltaOptimizer(0.001)
         optimizer_op = optimizer.minimize(loss, tf.train.get_global_step())
