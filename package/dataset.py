@@ -171,7 +171,7 @@ def tf_load_image(paths: tf.Tensor, n_channels=3):
 
     channels = []
     for i in range(n_channels):
-        img_bytes = tf.read_file(paths[n_channels])
+        img_bytes = tf.read_file(paths[i])
         img = tf.image.decode_image(img_bytes)
         channels.append(tf.squeeze(img))
 
