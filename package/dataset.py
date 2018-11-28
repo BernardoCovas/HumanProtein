@@ -1,11 +1,6 @@
 import os
-import shutil
-import logging
-import threading
+import glob
 import json
-import zipfile
-
-from typing import List
 
 import tensorflow as tf
 import numpy as np
@@ -25,7 +20,7 @@ class Dataset:
 
     FILTER_LIST = ["red", "green", "blue", "yellow"]
 
-    def __init__(self, dirname: str, csv_file: str):
+    def __init__(self, dirname: str, csv_file=None):
         """
         `dirname`: The directory containing all the images.
         `csv_file`: The associated csv file with ids and labels.
@@ -34,7 +29,9 @@ class Dataset:
         self._data = {}
         self._dirname = dirname
         self._csv_file = csv_file
-        self.reload()
+
+        if csv_file is not None:
+            self.reload()
 
     @property
     def img_ids(self):
@@ -77,6 +74,21 @@ class Dataset:
                 img_labels = label.split(" ")
                 self._data[img_id] = img_labels
 
+    def scan_dir(self):
+
+        img_ids = {}
+        channels = []
+        for channel in self.FILTER_LIST:
+            files_list = glob.glob(os.path.join(self._dirname, f"*{channel}*"))
+            channels.append(sorted(files_list))
+
+        for img_channels in zip(*channels):
+            img_id = os.path.commonprefix(img_channels)
+            img_id = os.path.basename(img_id).replace("_", "")
+            img_ids[img_id] = list(img_channels)
+
+        return img_ids
+
     def get_img_paths(self, img_id: str) -> list:
 
         if self._data.get(img_id) is None:
@@ -118,6 +130,8 @@ class Dataset:
 
         return label_vector
 
+    def vector_label(self, vector: np.ndarray):
+        return common.one_hot_to_label(vector)
 
 class PreProcessedDataset(Dataset):
 
@@ -153,11 +167,11 @@ class TFRecordKeys:
 def tf_load_clean_image():
     pass
 
-def tf_load_image(paths: tf.Tensor):
+def tf_load_image(paths: tf.Tensor, n_channels=3):
 
     channels = []
-    for i in range(4):
-        img_bytes = tf.read_file(paths[i])
+    for i in range(n_channels):
+        img_bytes = tf.read_file(paths[n_channels])
         img = tf.image.decode_image(img_bytes)
         channels.append(tf.squeeze(img))
 
