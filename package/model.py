@@ -84,7 +84,7 @@ class ProteinEstimator(tf.estimator.Estimator):
         warm_start_dir=None,
         config=None,
         train_backend=False,
-        optimizer=tf.train.RMSPropOptimizer,
+        optimizer=tf.train.AdamOptimizer,
         learning_rate=0.001):
 
         if model_dir is None:
@@ -121,8 +121,8 @@ def estimator_model_fn(
 
     config = common.ConfigurationJson()
     model_config = common.TFHubModels(config.TF_HUB_MODULE)
-    module = tf_hub.Module(model_config.url, trainable=train_backend,
-        tags={"train"} if train_backend else None)
+    module = tf_hub.Module(model_config.url, trainable=True,
+        tags=["train"] if train_backend else None)
 
     img_id_tensor = features.get(dataset_module.TFRecordKeys.ID)
     img_tensor = features.get(dataset_module.TFRecordKeys.DECODED)
@@ -135,6 +135,8 @@ def estimator_model_fn(
     if not head_only:
         feature_tensor = module(img_tensor)
         feature_tensor.set_shape([None, model_config.feature_vector_size])
+        if not train_backend:
+            feature_tensor = tf.stop_gradient(feature_tensor)
 
     logits = ClassifierModel(training).predict(feature_tensor)
 
