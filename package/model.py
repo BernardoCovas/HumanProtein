@@ -41,13 +41,16 @@ class ClassifierModel:
             keep_prob = 1
             if self._is_training:
                 keep_prob = 0.5
+
+            hidden = [512]
             
             # NOTE (bcovas) Sanity check.
             # I fell for this one already.
             net = feature_tensor
+            for n in hidden:
+                net = tf.nn.dropout(net, keep_prob)
+                net = tf.layers.dense(net, n, tf.nn.relu)
 
-            net = tf.nn.dropout(net, keep_prob)
-            net = tf.layers.dense(net, 512, tf.nn.relu)
             net = tf.nn.dropout(net, keep_prob)
             net = tf.layers.dense(net, len(common.PROTEIN_LABEL.keys()), None)
 
@@ -58,6 +61,15 @@ class ClassifierModel:
 
 
 class ProteinEstimator(tf.estimator.Estimator):
+    """
+    Custom estimator class. This class contains Keys
+    that might be used in the model_fn.
+    If you need fast prototyping, change it's model_funtion
+    (`estimator_model_fn`) in package/model.py.
+
+    Information on how this function works can be found at:
+    https://www.tensorflow.org/guide/custom_estimators#write_a_model_function
+    """
 
     IMAGE_ID = "image_id"
     IMAGE_INPUT = "image_input"
@@ -67,30 +79,57 @@ class ProteinEstimator(tf.estimator.Estimator):
     SCORES = "scores"
     PREDICTIONS = "predictions"
 
-    def __init__(self, config=None):
+    def __init__(self,
+        model_dir=None,
+        warm_start_dir=None,
+        config=None,
+        train_backend=False,
+        optimizer=tf.train.RMSPropOptimizer,
+        learning_rate=0.001):
+
+        if model_dir is None:
+            model_dir = common.PathsJson().MODEL_CHECKPOINT_DIR
+
+        def _model_fn(features, labels, mode, config):
+            return estimator_model_fn(
+                features, labels, mode, config,
+                train_backend, learning_rate,
+                optimizer, model_dir)
+
         super().__init__(
-            model_fn=estimator_model_fn,
-            model_dir=common.PathsJson().MODEL_CHECKPOINT_DIR,
-            config=config)
+            model_fn=_model_fn,
+            model_dir=model_dir,
+            config=config,
+            warm_start_from=warm_start_dir)
 
-def estimator_model_fn(features, labels, mode):
+def estimator_model_fn(
+        features,
+        labels,
+        mode,
+        config: tf.estimator.RunConfig,
+        train_backend: bool,
+        learning_rate: float,
+        tf_optimizer: tf.train.Optimizer,
+        model_dir: str):
 
-    head_only = False
     training = mode == tf.estimator.ModeKeys.TRAIN
     evaluating = mode == tf.estimator.ModeKeys.EVAL
     predicting = mode == tf.estimator.ModeKeys.PREDICT
 
+    head_only = False
+    train_backend = training and train_backend
+
     config = common.ConfigurationJson()
     model_config = common.TFHubModels(config.TF_HUB_MODULE)
-    module = tf_hub.Module(model_config.url, trainable=training,
-        tags={"train"} if training else None)
+    module = tf_hub.Module(model_config.url, trainable=train_backend,
+        tags={"train"} if train_backend else None)
 
     img_id_tensor = features.get(dataset_module.TFRecordKeys.ID)
     img_tensor = features.get(dataset_module.TFRecordKeys.DECODED)
     feature_tensor = features.get(dataset_module.TFRecordKeys.IMG_FEATURES)
 
     if img_id_tensor is None:
-        img_id_tensor = tf.convert_to_tensor("Null")
+        img_id_tensor = tf.convert_to_tensor(b"Null")
     if feature_tensor is not None:
         head_only = True
     if not head_only:
@@ -100,7 +139,7 @@ def estimator_model_fn(features, labels, mode):
     logits = ClassifierModel(training).predict(feature_tensor)
 
     prediction_scores = tf.nn.sigmoid(logits)
-    predictions = tf.cast(prediction_scores > 0.5, tf.float32)
+    predictions = tf.cast(prediction_scores > 0.5, tf.int64)
 
     if predicting:
 
@@ -117,102 +156,63 @@ def estimator_model_fn(features, labels, mode):
         return tf.estimator.EstimatorSpec(mode,
             predictions = prediction_dict)
 
-    loss = tf.nn.sigmoid_cross_entropy_with_logits(
-        logits=logits, labels=tf.to_float(labels))
-    loss = tf.reduce_sum(loss)
-    tf.summary.scalar("Loss", loss)
+    tf.losses.sigmoid_cross_entropy(tf.to_float(labels), logits)
+    total_loss = tf.losses.get_total_loss()
+
+    correct = tf.reduce_all(tf.equal(labels, predictions), axis=1)
+    correct = tf.cast(correct, tf.int32)
+    correct = correct / tf.shape(correct)
+    correct = tf.reduce_sum(correct)
+
+    FN = tf.reduce_sum(
+        tf.cast(tf.logical_and(tf.equal(labels, 1), tf.equal(predictions , 0)), tf.int32))
+    FP = tf.reduce_sum(
+        tf.cast(tf.logical_and(tf.equal(labels, 0), tf.equal(predictions , 1)), tf.int32))
+
+    FN = FN / tf.size(labels)
+    FP = FP / tf.size(labels)
 
     if evaluating:
 
         metrics = {
+            "Correct": tf.metrics.mean(correct),
+            "FN": tf.metrics.mean(FN),
+            "FP": tf.metrics.mean(FP),
             "Accuracy": tf.metrics.accuracy(labels, predictions),
-            "FN": tf.metrics.false_negatives(labels, predictions),
-            "FP": tf.metrics.false_positives(labels, predictions)
         }
-
-        for name, metric in metrics.items():
-            tf.summary.scalar(name, metric[1])
-        if not head_only:
-            tf.summary.image("ExampleImage", img_tensor, 8)
 
         return tf.estimator.EstimatorSpec(mode,
             predictions=predictions,
             eval_metric_ops=metrics,
-            loss=loss)
+            loss=total_loss)
 
     if training:
 
-        metrics = {
-            "Accuracy": tf.metrics.accuracy(labels, predictions)
-        }
+        if not head_only:
+            tf.summary.image("ExampleImage", img_tensor[:1], 1)
+        tf.summary.scalar("Correct", correct)
+        tf.summary.scalar("FN", FN)
+        tf.summary.scalar("FP", FP)
 
-        for name, metric in metrics.items():
-            tf.summary.scalar(name, metric[1])
-
-
-        optimizer = tf.train.AdadeltaOptimizer(0.001)
-        optimizer_op = optimizer.minimize(loss, tf.train.get_global_step())
+        optimizer: tf.train.Optimizer = tf_optimizer(learning_rate)
+        optimizer_op = optimizer.minimize(total_loss, tf.train.get_global_step())
 
         return tf.estimator.EstimatorSpec(mode,
             predictions=predictions,
-            loss=loss,
-            train_op=optimizer_op,
-            eval_metric_ops=metrics)
+            loss=total_loss,
+            train_op=optimizer_op)
 
-# NOT USED
+def focal_loss(predictions, labels, gamma=2.):
+    """
+    This implementation is experimental, and numerically unstable.
+    Might cause NaN's during training.
+    """
 
-class ExportedModel:
+    max_val = tf.maximum(-predictions, 0)
+    loss = predictions - predictions * labels + max_val + \
+        tf.math.log(tf.math.exp(-max_val) + tf.math.exp(-predictions - max_val))
 
-    _input_tensor = None
-    _output_tensor = None
+    invprops = tf.log_sigmoid(-predictions * (labels * 2 - 1))
+    loss = tf.math.exp(invprops * gamma) * loss
 
-    def __init__(self):
-        self.config = common.ConfigurationJson()
-
-    def load(self, sess: tf.Session, input_tensor: tf.Tensor, model_dir=None):
-
-        if model_dir is None:
-            import glob
-            files = glob.glob("**/*saved_model.pb*", recursive=True)
-            model_dir = os.path.dirname(sorted(files)[-1])
-
-        self._input_tensor = input_tensor
-
-        graph_def = tf.saved_model.loader.load(
-            sess,
-            [tf.saved_model.tag_constants.SERVING],
-            model_dir,
-            input_map={'input': input_tensor})
-
-        outputs_mapping = dict(graph_def.signature_def['serving_default'].outputs)
-
-        out_tensor_name = outputs_mapping['scores'].name
-        self._output_tensor = tf.get_default_graph().get_tensor_by_name(out_tensor_name)
-        
-        return self._output_tensor
-
-def export_model(dirname: str):
-
-    estimator = ProteinEstimator()
-
-    def input_function():
-
-        example = tf.placeholder(tf.string, [], "example_placeholder")
-        tensors_dict = dataset_module.tf_parse_single_example(example, [
-                dataset_module.TFRecordKeys.ID,
-                dataset_module.TFRecordKeys.IMG_PATHS,
-                dataset_module.TFRecordKeys.IMG_FEATURES,
-                dataset_module.TFRecordKeys.HEAD_ONLY
-            ])
-
-        tensors_dict[dataset_module.TFRecordKeys.DECODED] = \
-            dataset_module.tf_load_image(
-                tensors_dict[dataset_module.TFRecordKeys.IMG_PATHS])
-
-        receiver = tf.estimator.export.ServingInputReceiver(
-            tensors_dict,
-            {"examples": example})
-
-        return receiver
-
-    estimator.export_saved_model(dirname, input_function)
+    return tf.reduce_mean(tf.reduce_sum(loss, axis=1))
