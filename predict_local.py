@@ -6,87 +6,71 @@ import multiprocessing
 import tensorflow as tf
 import numpy as np
 
-from package.common import PathsJson, ConfigurationJson, one_hot_to_label, Submission
-from package.model import ExportedModel
-from package.dataset import tf_preprocess_directory_dataset
+from package import common, model as model_module, dataset as dataset_module
 
-def run_prediction(queue, dirname: str, batch_size: int, paralell_calls: int):
+def make_submission(batch_size: int, paralell_calls: int, sub_file: str):
 
-    # pylint: disable=E1129
-    with tf.Graph().as_default():
-        sess = tf.Session()
+    estimator = model_module.ProteinEstimator()
+    model_config = common.TFHubModels(common.ConfigurationJson().TF_HUB_MODULE)
 
-        model = ExportedModel()
-        dataset = tf_preprocess_directory_dataset(dirname, paralell_calls)
+    dir_dataset = dataset_module.Dataset(common.PathsJson().DIR_TRAIN)
+    img_ids_paths = dir_dataset.scan_dir()
 
-        dataset = dataset.batch(batch_size)
-        dataset = dataset.prefetch(1)
+    def g():
+        for items in img_ids_paths.items():
+            yield items
 
-        image_tensor, img_id_tensor = dataset.make_one_shot_iterator().get_next()
-        predict_tensor = model.load(sess, image_tensor)
+    def input_fn():
+        def _map_fn(img_id, paths):
 
-        predict_tensor = predict_tensor > 0.5
+            img = dataset_module.tf_load_image(paths)
+            img = tf.image.crop_to_bounding_box(
+                img,
+                tf.to_int32((tf.shape(img)[0] - model_config.expected_image_size[0]) / 2),
+                tf.to_int32((tf.shape(img)[1] - model_config.expected_image_size[1]) / 2),
+                model_config.expected_image_size[0],
+                model_config.expected_image_size[1],
+            )[:, :, 0:3] / 255
 
-        while True:
-            try:
-                preds, img_ids = sess.run([predict_tensor, img_id_tensor])
-                queue.put((preds, img_ids))
+            return {
+                dataset_module.TFRecordKeys.ID: img_id,
+                dataset_module.TFRecordKeys.DECODED: img
+            }
 
-            except tf.errors.OutOfRangeError:
-                return
+        dataset = tf.data.Dataset.from_generator(g, (tf.string, tf.string), ([], [None])) \
+            .apply(tf.data.experimental.map_and_batch(_map_fn, batch_size)) \
+            .prefetch(None)
 
-def make_submission(queue, submission_fname: str):
+        return dataset
 
-    logging.basicConfig(level=logging.INFO)
+    desired_pred= [
+        estimator.IMAGE_ID,
+        estimator.SCORES]
 
-    submission = Submission(submission_fname)
-    logger = logging.getLogger("Predictor")
-    
-    while True:
-        
-        preds_img_ids = queue.get()
-        if preds_img_ids is None:
-            break
+    submission = common.Submission(sub_file)
+    logger = logging.getLogger("predictor")
+    logger.info(f"Using batch of {batch_size}")
+    logger.info(f"Using {paralell_calls} paralell calls")
 
-        preds, img_ids = preds_img_ids
-        labels = one_hot_to_label(preds)
+    tf.logging.set_verbosity(tf.logging.INFO)
+    for i, predictions in enumerate(estimator.predict(input_fn, desired_pred)):
+        i += 1
 
-        for img_id, label in list(zip(img_ids, labels)):
-            
-            img_id = img_id[0].decode()
-            img_id = os.path.basename(img_id).replace("_red.png", "")
+        img_id = predictions[estimator.IMAGE_ID]
+        scores = predictions[estimator.SCORES]
+        labels = dir_dataset.vector_label((scores > 0.5).astype(np.int))
+        submission.add_submission(img_id.decode(), labels)
 
-            submission.add_submission(img_id, label)
-
-            logger.info(f"{img_id} -> {label}")
+        if i % 100 == 0:
+            logger.info(f"Wrote {i} examples.")
 
     submission.end_sumbission()
-    logger.info("Done")
-
+    logger.info(f"Finished, wrote {i} examples.")
 
 if __name__ == "__main__":
-    
+
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger("tensorflow").propagate=False
+    tf.logging.set_verbosity(tf.logging.ERROR)
 
-    sub_file = "prediction"
-    paths = PathsJson()
-
-    if not os.path.exists(paths.SUBMISSION_DIR):
-        os.makedirs(paths.SUBMISSION_DIR)
-
-    queue = multiprocessing.Queue(10)
-
-    producer = multiprocessing.Process(target=run_prediction, args=(queue, paths.TEST_DATA_CLEAN_PATH, 50, 16))
-    consumer = multiprocessing.Process(target=make_submission, args=(queue, sub_file))
-
-    init = time.time()
-
-    producer.start()
-    consumer.start()
-
-    producer.join()
-    queue.put(None)
-    consumer.join()
-
-    end = time.time()
-    print(end - init)
+    make_submission(10, 20, os.path.join(common.PathsJson().SUBMISSION_DIR, "prediction.csv"))
