@@ -306,7 +306,7 @@ class Submission:
 
 def one_hot_to_label(one_hot_list: np.ndarray):
 
-    labels = np.arange(28)[one_hot_list == 1]
+    labels = np.arange(NUM_CLASSES)[one_hot_list == 1]
     return list(map(str, labels))
 
 def strip_fname_for_id(fname: str):
