@@ -79,7 +79,7 @@ class InceptionV3(TFHubModel):
     def url(self):
         return "https://tfhub.dev/google/imagenet/inception_v3/feature_vector/1"
 
-class MobileNetV2(TFHubModel):
+class MobileNetV2_140_224(TFHubModel):
 
     @property
     def expected_image_size(self):
@@ -92,6 +92,20 @@ class MobileNetV2(TFHubModel):
     @property
     def url(self):
         return "https://tfhub.dev/google/imagenet/mobilenet_v2_140_224/feature_vector/2"
+
+class MobileNetV2_035_224(TFHubModel):
+
+    @property
+    def expected_image_size(self):
+        return (224, 224)
+
+    @property
+    def feature_vector_size(self):
+        return 1280
+
+    @property
+    def url(self):
+        return "https://tfhub.dev/google/imagenet/mobilenet_v2_035_224/feature_vector/2"
 
 class ResNetV2_50(TFHubModel):
 
@@ -110,7 +124,8 @@ class ResNetV2_50(TFHubModel):
 TFHUB_MODELS = {
     "PNASNet": PNASNet,
     "InceptionV3": InceptionV3,
-    "MobileNetV2": MobileNetV2,
+    "MobileNetV2_140_224": MobileNetV2_140_224,
+    "MobileNetV2_035_224": MobileNetV2_035_224,
     "ResNetV2_50": ResNetV2_50
 }
 
