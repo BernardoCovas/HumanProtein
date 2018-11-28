@@ -95,7 +95,7 @@ def train(
     estimator = model_module.ProteinEstimator(
         train_backend=train_backend,
         learning_rate=learning_rate,
-        optimizer=tf.train.RMSPropOptimizer,
+        optimizer=tf.train.AdagradOptimizer,
         warm_start_dir=warm_start_dir)
 
     train_spec = tf.estimator.TrainSpec(
