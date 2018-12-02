@@ -25,7 +25,7 @@ from package import common, dataset as dataset_module, model as model_module
 
 
 def make_submission(
-        tfrecord_name: str,
+        dataset: dataset_module.Dataset,
         submission_fname: str,
         batch_size: int,
         paralell_calls: int):
@@ -34,31 +34,21 @@ def make_submission(
 
     def _inp_fn():
 
-        def map_fn(example):
+        def map_fn(img_id, img_paths):
 
-            features = dataset_module.tf_parse_single_example(example, [
-                dataset_module.TFRecordKeys.ID,
-                dataset_module.TFRecordKeys.IMG_PATHS
-            ])
-
-            img_id = features[dataset_module.TFRecordKeys.ID]
-            paths = features[dataset_module.TFRecordKeys.IMG_PATHS]
-
-            img = dataset_module.tf_load_image(paths)[:, :, 0:3]
-            img = tf.to_float(img) / 255
+            img = dataset_module.tf_load_image(img_paths)[:, :, 0:3]
             img = tf.image.random_crop(img, config.expected_image_size + (3,))
+            img = tf.to_float(img) / 255
 
             return {
                 dataset_module.TFRecordKeys.ID: img_id,
                 dataset_module.TFRecordKeys.DECODED: img
             }
 
-        dataset = tf.data.TFRecordDataset(tfrecord_name) \
-            .map(map_fn, paralell_calls) \
-            .batch(batch_size) \
-            .prefetch(2)
-
-        return dataset
+        return dataset.tf_dataset() \
+                .map(map_fn, paralell_calls) \
+                .batch(batch_size) \
+                .prefetch(2)
 
     logger = logging.getLogger("Submittor")
     submission = common.Submission(submission_fname)
@@ -116,10 +106,9 @@ if __name__ == "__main__":
     import sys
 
     paths = common.PathsJson()
-    records={
-        "train": paths.TRAIN_RECORD,
-        "test": paths.TEST_RECORD,
-        "predict": paths.PREDICT_FEATURES_RECORD
+    datasets ={
+        "train": (paths.DIR_TRAIN, paths.CSV_TRAIN),
+        "predict": (paths.DIR_TEST, paths.CSV_TEST)
     }
 
     argparser = argparse.ArgumentParser()
@@ -133,8 +122,8 @@ if __name__ == "__main__":
     Defauts to 1 (Sequential).
     """)
     argparser.add_argument(
-        "--feature_record", help=f"""
-    What feature_record to use. Defaults to predict. {list(records.keys())}
+        "--dataset", help=f"""
+    What image dataset to use. Defaults to predict. {list(datasets.keys())}
     """)
     argparser.add_argument(
         "--validate", action="store_true", help=f"""
@@ -157,29 +146,30 @@ if __name__ == "__main__":
     tf.logging.set_verbosity(tf.logging.WARN)
     tflogger.propagate = False
 
-    record = records.get(args.feature_record)
-    if record is None:
-        logger.error(f"Unknown record: {record}. Use -h for help.")
+    dataset_paths = datasets.get(args.dataset)
+    if dataset_paths is None:
+        logger.error(f"Unknown dataset: {args.dataset}. Use -h for help.")
         exit(1)
 
     if not os.path.exists(paths.SUBMISSION_DIR):
         os.makedirs(paths.SUBMISSION_DIR)
 
     sub_file = os.path.join(paths.SUBMISSION_DIR, args.submission_name)
+    dataset = dataset_module.Dataset(*dataset_paths)
 
     init = time.time()
 
     make_submission(
-        record,
+        dataset,
         sub_file,
         args.batch_size,
         args.paralell_calls)
 
     if args.validate:
-        if args.feature_record == "predict":
+        if args.dataset == "predict":
             validate_sumbission(paths.CSV_TEST, sub_file)
         else:
-            logger.error(f"Can't validate '{args.feature_record}'. Only 'predict'.")
+            logger.error(f"Can't validate '{args.dataset}'. Only 'predict'.")
 
     end = time.time()
 
