@@ -18,9 +18,7 @@ def train(
         epochs: int,
         eval_steps: int,
         batch_size: int,
-        train_record: str,
-        eval_record: str,
-        clean: bool,
+        dataset: dataset_module.Dataset,
         paralell_calls: int):
 
     logger = logging.getLogger("trainer")
@@ -35,59 +33,44 @@ def train(
     logger.info(f"Training for {epochs} epochs")
     logger.info(f"Running {eval_steps} evaluation steps")
 
+    dataset.reload()
+
     def _inp_fn(eval: bool):
         crop = True
 
-        record = train_record
+        train_dataset, eval_dataset = dataset.tf_split()
         if eval:
-            record = eval_record
+            train_dataset = eval_dataset
+        else:
+            train_dataset = train_dataset.repeat().shuffle(1000)
 
-        dataset = tf.data.TFRecordDataset(record) \
-                .shuffle(batch_size * 100)
+        def _map_fn(img_id, img_paths, img_label):
 
-        if not eval:
-            dataset = dataset.repeat()
-
-        def _map_fn(example):
-            
-            features = dataset_module.tf_parse_single_example(
-                example,
-                [
-                    dataset_module.TFRecordKeys.ID,
-                    dataset_module.TFRecordKeys.LABEL,
-                    dataset_module.TFRecordKeys.IMG_PATHS
-                ])
-
-            img_id = features[dataset_module.TFRecordKeys.ID]
-            label = features[dataset_module.TFRecordKeys.LABEL]
-            paths = features[dataset_module.TFRecordKeys.IMG_PATHS]
-
-            img = dataset_module.tf_load_image(paths, n_channels=3)
+            n_channels = 4
+            shape = model_config.expected_image_size
+            img = dataset_module.tf_load_image(img_paths, n_channels=n_channels)
 
             if crop:
-                img = tf.random_crop(img, model_config.expected_image_size + (3,))
+                img = tf.random_crop(img, shape + (n_channels,))
                 img = tf.to_float(img)
             else:
-                img = tf.image.resize_bilinear([img], model_config.expected_image_size)[0]
+                img = tf.image.resize_bilinear([img], shape)[0]
+            img.set_shape(shape + (n_channels,))
 
             img = tf.image.random_flip_left_right(img)
             img = tf.image.random_flip_up_down(img)
+            img = img[:, :, 0:3]
 
             return {
                 dataset_module.TFRecordKeys.ID: img_id,
                 dataset_module.TFRecordKeys.DECODED: img / 255,
-            }, label
+            }, img_label
 
-        features_label = dataset.apply(
+        features_label = train_dataset.apply(
             tf.data.experimental.map_and_batch(_map_fn, batch_size, paralell_calls)) \
             .prefetch(None) \
 
         return features_label
-
-    # NOTE (bcovas) MirroredStrategy seems to be failing
-    # on windows. Fails with no errors.
-    strategy = tf_contrib.distribute.ParameterServerStrategy(num_gpus_per_worker=1)
-    config = tf.estimator.RunConfig(train_distribute=strategy)
 
     tflogger = logging.getLogger("tensorflow")
     tflogger.propagate = False
@@ -136,9 +119,9 @@ if __name__ == "__main__":
     and we want to unfreeze the backend network. Adam's vars will not be set for
     the backend network)
     """)
-    parser.add_argument("--train_backend", action="store_true", help=f"""
-    If set, train the backend network. Else just train the classifier head, keeping
-    the rest of the network frozen.
+    parser.add_argument("--freeze_backend", action="store_true", help=f"""
+    If set, freeze the backend network.
+    Else train the classifier head along with the backend network.
     """)
     parser.add_argument("--learning_rate", type=float, default=0.01, help=f"""
     Learning rate to use in the training process. Defaults to 0.01
@@ -151,14 +134,8 @@ if __name__ == "__main__":
     The number of training steps. Defaults to the config file value ({config.EPOCHS}).
     If -1, train indefinitely.
     """)
-    parser.add_argument("--eval_steps", type=int, default=1000, help=f"""
-    Number of eval steps. Defaults to 1000.
-    """)
-    parser.add_argument("--train_record", default=paths.TRAIN_RECORD, help=f"""
-    Path of the training tfrecord. Defaults to {paths.TRAIN_RECORD}.
-    """)
-    parser.add_argument("--eval_record", default=paths.TEST_RECORD, help=f"""
-    Path of the eval tfrecord. Defaults to {paths.TEST_RECORD}.
+    parser.add_argument("--eval_steps", type=int, default=None, help=f"""
+    Number of eval steps. Defaults to the entire eval datastet.
     """)
     parser.add_argument("--clean", action="store_true", help="""
     Expect clean data. If you parsed the images in the parse_data.py script,
@@ -199,12 +176,10 @@ if __name__ == "__main__":
 
     train(
         old_checkpoint_dir,
-        args.train_backend,
+        not args.freeze_backend,
         args.learning_rate,
         args.epochs,
         args.eval_steps,
         args.batch_size,
-        args.train_record,
-        args.eval_record,
-        args.clean,
+        dataset_module.Dataset(paths.DIR_TRAIN, paths.CSV_TRAIN),
         os.cpu_count() + 1)
