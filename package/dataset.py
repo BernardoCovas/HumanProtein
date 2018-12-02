@@ -89,14 +89,14 @@ class Dataset:
 
         return img_ids
 
-    def get_img_paths(self, img_id: str) -> list:
+    def get_img_paths(self, img_id: str, extension="png") -> list:
 
         if self._data.get(img_id) is None:
             raise ValueError(f"{img_id} does not exist in this dataset.")
 
         paths = []
         for channel in self.FILTER_LIST:
-            paths.append(os.path.join(self._dirname, f"{img_id}_{channel}.png"))
+            paths.append(os.path.join(self._dirname, f"{img_id}_{channel}.{extension}"))
 
         return paths
 
