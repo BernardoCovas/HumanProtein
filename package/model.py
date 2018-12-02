@@ -122,7 +122,7 @@ def estimator_model_fn(
     config = common.ConfigurationJson()
     model_config = common.TFHubModels(config.TF_HUB_MODULE)
     module = tf_hub.Module(model_config.url, trainable=True,
-        tags=["train"] if train_backend else None)
+        tags={"train"})
 
     img_id_tensor = features.get(dataset_module.TFRecordKeys.ID)
     img_tensor = features.get(dataset_module.TFRecordKeys.DECODED)
