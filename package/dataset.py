@@ -133,6 +133,38 @@ class Dataset:
     def vector_label(self, vector: np.ndarray):
         return common.one_hot_to_label(vector)
 
+    def tf_dataset(self, with_labels=False, ids=None):
+
+        if ids is None:
+            ids = self.img_ids
+
+        def gen():
+            for img_id in ids:
+                img_paths = self.get_img_paths(img_id)
+                if with_labels:
+                    labels = self.label_vector(img_id)
+                    yield img_id, img_paths, labels
+                    continue
+                yield img_id, img_paths
+
+        if with_labels:
+            return tf.data.Dataset.from_generator(gen,
+            (tf.string, tf.string, tf.int64),
+            ([], [None], [None]))
+        return tf.data.Dataset.from_generator(gen,
+            (tf.string, tf.string),
+            ([], [None]))
+
+    def tf_split(self, fraction=0.8):
+        n = len(self.img_ids)
+        split = round(n*fraction)
+        eval_ids = self.img_ids[0:split]
+        train_ids = self.img_ids[split:]
+
+        assert len(eval_ids + train_ids) == n
+
+        return self.tf_dataset(True, train_ids), self.tf_dataset(True, eval_ids)
+
 class PreProcessedDataset(Dataset):
 
     def get_img_path(self, img_id: str) -> str:
@@ -164,18 +196,25 @@ class TFRecordKeys:
         HEAD_ONLY: tf.FixedLenFeature([], tf.bool, False)
     }
 
-def tf_load_clean_image():
-    pass
-
 def tf_load_image(paths: tf.Tensor, n_channels=3):
 
     channels = []
-    for i in range(n_channels):
+    for i in range(4):
         img_bytes = tf.read_file(paths[i])
         img = tf.image.decode_image(img_bytes)
         channels.append(tf.squeeze(img))
 
-    return tf.stack(channels, -1)
+    if n_channels == 4:
+        return tf.stack(channels, -1)
+
+    if n_channels == 3:
+        ch = []
+        ch.append(tf.cast(channels[0] / 2 + channels[-1] / 2, tf.uint8))
+        for i in range(1, 3):
+            ch.append(channels[i])
+        return tf.stack(ch, -1)
+
+    raise NotImplementedError()
 
 def tf_imgid_to_img(img_id: str, dirname: str):
     """
