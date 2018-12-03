@@ -94,5 +94,8 @@ if __name__ == "__main__":
         print(f"Unrecognized dir: {args.directory}")
         exit(1)
 
+    if not os.path.exists(dataset_args[0]):
+        os.makedirs(dataset_args[0])
+
     dataset = dataset_module.Dataset(*dataset_args)
     main(dataset)
