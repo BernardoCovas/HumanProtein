@@ -119,6 +119,7 @@ if __name__ == "__main__":
     """)
     parser.add_argument("--warm_start_from", type=str, default=None, help="""
     Same as warm_start, except from a specified checkpoint.
+    Overrides --warm_start.
     """)
     parser.add_argument("--exclude_head", action="store_true", help="""
     If set, do not estore the classifier head from the checkpoint.
