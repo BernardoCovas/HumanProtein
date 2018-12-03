@@ -151,10 +151,11 @@ class ConfigurationJson:
 
     CONFIG_FNAME = "CONFIGURATION.json"
     EXAMPEL_CONFIG = {
-        "TF_HUB_MODULE": "InceptionV3",
-        "EXPORTED_MODEL_DIR": "./Exported/",
+        "TF_HUB_MODULE": "MobileNetV2_140_224",
+        "WARM_SART_DIR": "warm_start",
         "BATCH_SIZE": "100",
-        "EPOCHS": "100000"
+        "EPOCHS": "-1",
+        "EVAL_EPOCHS": "-1",
     }
 
     _config_data = {}
@@ -184,16 +185,16 @@ class ConfigurationJson:
         return str(self._config_data.get("TF_HUB_MODULE"))
 
     @property
+    def WARM_SART_DIR(self):
+        return str(self._config_data.get("WARM_SART_DIR"))
+
+    @property
     def BATCH_SIZE(self):
         return int(self._config_data.get("BATCH_SIZE"))
 
     @property
     def EPOCHS(self):
         return int(self._config_data.get("EPOCHS"))
-    
-    @property
-    def EXPORTED_MODEL_DIR(self):
-        return str(self._config_data.get("EXPORTED_MODEL_DIR"))
 
 class PathsJson:
 
