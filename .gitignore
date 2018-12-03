@@ -11,6 +11,7 @@
 .data
 PATHS.json
 CONFIGURATION.json
+warm_start
 
 # TF MODEL DATA
 **/checkpoint
