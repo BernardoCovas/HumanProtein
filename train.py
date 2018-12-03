@@ -9,6 +9,7 @@ from package import common, dataset as dataset_module, model as model_module
 
 def train(
         warm_start_dir: str,
+        restore_head: bool,
         train_backend: bool,
         learning_rate: float,
         epochs: int,
@@ -24,6 +25,7 @@ def train(
     model_config = common.TFHubModels(config_json.TF_HUB_MODULE)
 
     logger.info("%sTraining backend", "NOT " if not train_backend else "")
+    logger.info("%sRestoring classifier head", "NOT " if not restore_head else "")
     logger.info("Using learning rate of %f", learning_rate)
     logger.info("Using batch of %d", batch_size)
     logger.info("Training for %s epochs", str(epochs))
@@ -32,7 +34,6 @@ def train(
     dataset.reload()
 
     def _inp_fn(is_eval: bool):
-        crop = True
 
         train_dataset, eval_dataset = dataset.tf_split()
         if is_eval:
@@ -43,17 +44,19 @@ def train(
         def _map_fn(img_id, img_paths, img_label):
 
             n_channels = 4
-            shape = model_config.expected_image_size
+            shape = model_config.non_tfhub_image_size
             img = dataset_module.tf_load_image(img_paths, n_channels=n_channels)
 
-            if crop:
-                img = tf.random_crop(img, shape + (n_channels,))
-                img = tf.to_float(img)
-            else:
-                img = tf.image.resize_bilinear([img], shape)[0]
+            begin, size, _ = tf.image.sample_distorted_bounding_box(
+                tf.shape(img), tf.convert_to_tensor([[[.0, .0, 1., 1.]]]),
+                use_image_if_no_bounding_boxes=True)
+
+            img = tf.slice(img, begin, size)
+            img = tf.image.resize_bilinear([img], shape)[0]
 
             img = tf.image.random_flip_left_right(img)
             img = tf.image.random_flip_up_down(img)
+            img.set_shape((None, None, n_channels))
 
             return {
                 dataset_module.TFRecordKeys.ID: img_id,
@@ -76,6 +79,7 @@ def train(
         learning_rate=learning_rate,
         optimizer=tf.train.AdamOptimizer,
         warm_start_dir=warm_start_dir,
+        restore_head=restore_head,
         config=config)
 
     train_spec = tf.estimator.TrainSpec(
@@ -113,6 +117,12 @@ if __name__ == "__main__":
     and we want to unfreeze the backend network. Adam's vars will not be set for
     the backend network)
     """)
+    parser.add_argument("--warm_start_from", type=str, default=None, help="""
+    Same as warm_start, except from a specified checkpoint.
+    """)
+    parser.add_argument("--exclude_head", action="store_true", help="""
+    If set, do not estore the classifier head from the checkpoint.
+    """)
     parser.add_argument("--freeze_backend", action="store_true", help=f"""
     If set, freeze the backend network.
     Else train the classifier head along with the backend network.
@@ -141,6 +151,8 @@ if __name__ == "__main__":
 
     if args.warm_start:
         warm_start_dir = config.WARM_SART_DIR
+    if args.warm_start_from:
+        warm_start_dir = args.warm_start_from
 
     if args.override:
         for dirname in [paths.MODEL_CHECKPOINT_DIR]:
@@ -155,6 +167,7 @@ if __name__ == "__main__":
 
     train(
         warm_start_dir,
+        not args.exclude_head,
         not args.freeze_backend,
         args.learning_rate,
         args.epochs,

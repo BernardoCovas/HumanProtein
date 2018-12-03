@@ -52,7 +52,6 @@ class MobileNetV2:
     SCOPE = "MobilenetV2"
     EXCLUDE = [
         "MobilenetV2/Conv/",
-        "global_step",
         "MobilenetV2/Logits/"
     ]
 
@@ -94,6 +93,7 @@ class ProteinEstimator(tf.estimator.Estimator):
             self,
             model_dir=None,
             warm_start_dir=None,
+            restore_head=True,
             config=None,
             train_backend=False,
             optimizer=tf.train.AdamOptimizer,
@@ -106,7 +106,8 @@ class ProteinEstimator(tf.estimator.Estimator):
             return estimator_model_fn(
                 features, labels, mode, config,
                 train_backend, learning_rate,
-                optimizer, warm_start_dir)
+                optimizer, warm_start_dir,
+                restore_head)
 
         super().__init__(
             model_fn=_model_fn,
@@ -121,7 +122,8 @@ def estimator_model_fn(
         train_backend: bool,
         learning_rate: float,
         tf_optimizer: tf.train.Optimizer,
-        warm_start_dir: str):
+        warm_start_dir: str,
+        restore_head: bool):
 
     logger = logging.getLogger("model_fn")
 
@@ -202,7 +204,7 @@ def estimator_model_fn(
 
             assignment_map = {}
             tf_vars = tf_slim.get_variables_to_restore(
-                exclude=MobileNetV2.EXCLUDE + ClassifierModel.EXCLUDE)
+                exclude=MobileNetV2.EXCLUDE + (ClassifierModel.EXCLUDE + ["global_step"]) if not restore_head else [])
 
             for var in tf_vars:
                 var_name = var.name.replace(":0", "")
