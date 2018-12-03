@@ -1,13 +1,9 @@
-import sys
 import os
 import shutil
-import time
 import logging
-import random
+import argparse
 
 import tensorflow as tf
-import tensorflow.contrib as tf_contrib
-import numpy as np
 
 from package import common, dataset as dataset_module, model as model_module
 
@@ -27,19 +23,19 @@ def train(
     config_json = common.ConfigurationJson()
     model_config = common.TFHubModels(config_json.TF_HUB_MODULE)
 
-    logger.info(("NOT " if not train_backend else "") + "Training backend")
-    logger.info(f"Using learning rate of {learning_rate}")
-    logger.info(f"Using batch of {batch_size}")
-    logger.info(f"Training for {epochs} epochs")
-    logger.info(f"Running {eval_steps} evaluation steps")
+    logger.info("%sTraining backend", "NOT " if not train_backend else "")
+    logger.info("Using learning rate of %f", learning_rate)
+    logger.info("Using batch of %d", batch_size)
+    logger.info("Training for %s epochs", str(epochs))
+    logger.info("Running %s evaluation steps", str(eval_steps))
 
     dataset.reload()
 
-    def _inp_fn(eval: bool):
+    def _inp_fn(is_eval: bool):
         crop = True
 
         train_dataset, eval_dataset = dataset.tf_split()
-        if eval:
+        if is_eval:
             train_dataset = eval_dataset
         else:
             train_dataset = train_dataset.repeat().shuffle(1000)
@@ -55,11 +51,9 @@ def train(
                 img = tf.to_float(img)
             else:
                 img = tf.image.resize_bilinear([img], shape)[0]
-            img.set_shape(shape + (n_channels,))
 
             img = tf.image.random_flip_left_right(img)
             img = tf.image.random_flip_up_down(img)
-            img = img[:, :, 0:3]
 
             return {
                 dataset_module.TFRecordKeys.ID: img_id,
@@ -75,11 +69,14 @@ def train(
     tflogger = logging.getLogger("tensorflow")
     tflogger.propagate = False
 
+    config = tf.estimator.RunConfig(save_checkpoints_secs=None, save_checkpoints_steps=2000)
+
     estimator = model_module.ProteinEstimator(
         train_backend=train_backend,
         learning_rate=learning_rate,
-        optimizer=tf.train.AdagradOptimizer,
-        warm_start_dir=warm_start_dir)
+        optimizer=tf.train.AdamOptimizer,
+        warm_start_dir=warm_start_dir,
+        config=config)
 
     train_spec = tf.estimator.TrainSpec(
         lambda: _inp_fn(False),
@@ -93,9 +90,6 @@ def train(
 
 
 if __name__ == "__main__":
-
-    import argparse
-    import os
 
     logging.basicConfig(level=logging.INFO)
 
@@ -141,41 +135,26 @@ if __name__ == "__main__":
     Expect clean data. If you parsed the images in the parse_data.py script,
     use this flag.
     """)
-    parser.add_argument("--export_dir", type=str, default=config.EXPORTED_MODEL_DIR, help = f"""
-    Final complete model export directory. Defaults to {config.EXPORTED_MODEL_DIR}.
-    """)
 
     args = parser.parse_args()
-    old_checkpoint_dir = "models.old"
-
-    dirnames = [
-        paths.MODEL_CHECKPOINT_DIR,
-        args.export_dir,
-    ]
+    warm_start_dir = None
 
     if args.warm_start:
-        shutil.rmtree(old_checkpoint_dir, True)
-        # NOTE (bcovas) If tensorboard is active, this second step might fail.
-        # By copying first and then deleting we ensure the dir is not lost.
-        shutil.copytree(paths.MODEL_CHECKPOINT_DIR, old_checkpoint_dir)
-        shutil.rmtree(paths.MODEL_CHECKPOINT_DIR, True)
-        
-    else:
-        if args.override:
-            for dirname in dirnames + [old_checkpoint_dir]:
-                logger.warning(f"Overriding: {dirname}")
-                shutil.rmtree(dirname, True)
-        old_checkpoint_dir = None
+        warm_start_dir = config.WARM_SART_DIR
 
-    for dirname in dirnames:
-        if not os.path.exists(dirname):
-            os.makedirs(dirname)
+    if args.override:
+        for dirname in [paths.MODEL_CHECKPOINT_DIR]:
+            logger.warning("Overriding: %s", dirname)
+            shutil.rmtree(dirname, True)
+
+    if not os.path.exists(paths.MODEL_CHECKPOINT_DIR):
+        os.makedirs(paths.MODEL_CHECKPOINT_DIR)
 
     if args.epochs < 0:
         args.epochs = None
 
     train(
-        old_checkpoint_dir,
+        warm_start_dir,
         not args.freeze_backend,
         args.learning_rate,
         args.epochs,
