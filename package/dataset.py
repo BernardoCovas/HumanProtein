@@ -89,16 +89,15 @@ class Dataset:
 
         return img_ids
 
-    def get_img_paths(self, img_id: str, extension="png") -> list:
+    def get_img_paths(self, img_id: str, extension="jpg") -> list:
 
         if self._data.get(img_id) is None:
             raise ValueError(f"{img_id} does not exist in this dataset.")
 
-        paths = []
-        for channel in self.FILTER_LIST:
-            paths.append(os.path.join(self._dirname, f"{img_id}_{channel}.{extension}"))
+        path_rgb = os.path.join(self._dirname, f"{img_id}.{extension}")
+        path_yel = os.path.join(self._dirname, f"{img_id}_yellow.{extension}")
 
-        return paths
+        return [path_rgb, path_yel]
 
     def prepared(self):
 
@@ -196,25 +195,19 @@ class TFRecordKeys:
         HEAD_ONLY: tf.FixedLenFeature([], tf.bool, False)
     }
 
-def tf_load_image(paths: tf.Tensor, n_channels=3):
+def tf_load_image(paths: [], n_channels=3):
 
-    channels = []
-    for i in range(4):
-        img_bytes = tf.read_file(paths[i])
-        img = tf.image.decode_image(img_bytes)
-        channels.append(tf.squeeze(img))
+    if n_channels not in [3, 4]:
+        raise ValueError("Only 3 or 4 channels.")
+
+    rgb = tf.image.decode_image(tf.read_file(paths[0]))
 
     if n_channels == 4:
-        return tf.stack(channels, -1)
+        yel = tf.image.decode_image(tf.read_file(paths[1]))
+        rgby = tf.concat([rgb, yel], -1)
+        return rgby
 
-    if n_channels == 3:
-        ch = []
-        ch.append(tf.cast(channels[0] / 2 + channels[-1] / 2, tf.uint8))
-        for i in range(1, 3):
-            ch.append(channels[i])
-        return tf.stack(ch, -1)
-
-    raise NotImplementedError()
+    return rgb
 
 def tf_imgid_to_img(img_id: str, dirname: str):
     """
