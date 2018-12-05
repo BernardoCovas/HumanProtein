@@ -16,7 +16,6 @@
 import os
 import time
 import logging
-import multiprocessing
 
 import tensorflow as tf
 import numpy as np
@@ -36,9 +35,10 @@ def make_submission(
 
         def map_fn(img_id, img_paths):
 
-            img = dataset_module.tf_load_image(img_paths)[:, :, 0:3]
-            img = tf.image.random_crop(img, config.expected_image_size + (3,))
-            img = tf.to_float(img) / 255
+            img = dataset_module.tf_load_image(img_paths, 4)
+            img = tf.image.resize_bilinear([img], config.non_tfhub_image_size)[0]
+            img.set_shape((None, None, 4))
+            img = tf.to_float(img) / 255 * 2 - 1
 
             return {
                 dataset_module.TFRecordKeys.ID: img_id,
