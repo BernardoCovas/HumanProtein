@@ -45,22 +45,23 @@ def train(
 
             n_channels = 4
             shape = model_config.non_tfhub_image_size
-            img = dataset_module.tf_load_image(img_paths, n_channels=n_channels)
+            raw_img = dataset_module.tf_load_image(img_paths, n_channels=n_channels)
 
-            begin, size, _ = tf.image.sample_distorted_bounding_box(
-                tf.shape(img), tf.convert_to_tensor([[[.0, .0, 1., 1.]]]),
-                use_image_if_no_bounding_boxes=True)
+            # begin, size, _ = tf.image.sample_distorted_bounding_box(
+            #     tf.shape(raw_img), tf.convert_to_tensor([[[.0, .0, 1., 1.]]]),
+            #     use_image_if_no_bounding_boxes=True)
 
-            img = tf.slice(img, begin, size)
-            img = tf.image.resize_bilinear([img], shape)[0]
+            # img = tf.slice(raw_img, begin, size)
+            img = tf.image.resize_bilinear([raw_img], shape)[0]
 
             img = tf.image.random_flip_left_right(img)
             img = tf.image.random_flip_up_down(img)
             img.set_shape((None, None, n_channels))
+            img_normalized = (img / 255) * 2 - 1
 
             return {
                 dataset_module.TFRecordKeys.ID: img_id,
-                dataset_module.TFRecordKeys.DECODED: img / 255,
+                dataset_module.TFRecordKeys.DECODED: img_normalized,
             }, img_label
 
         features_label = train_dataset.apply(
@@ -128,8 +129,8 @@ if __name__ == "__main__":
     If set, freeze the backend network.
     Else train the classifier head along with the backend network.
     """)
-    parser.add_argument("--learning_rate", type=float, default=0.01, help=f"""
-    Learning rate to use in the training process. Defaults to 0.01
+    parser.add_argument("--learning_rate", type=float, default=0.001, help=f"""
+    Learning rate to use in the training process. Defaults to 0.001
     """)
     parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE, help=f"""
     The number of images that go through the deep learing model at once.
