@@ -3,10 +3,10 @@ import logging
 
 from tensorflow.contrib import slim as tf_slim
 import tensorflow as tf
-import tensorflow_hub as tf_hub
 
 from .models.research.slim.nets.mobilenet import mobilenet_v2
 from . import common, dataset as dataset_module
+
 
 class ClassifierModel:
 
@@ -19,13 +19,12 @@ class ClassifierModel:
     def predict(self, feature_tensor: tf.Tensor):
         """
         Returns the classifier logits tensor.
-        """ 
+        """
         return self._model_fn(feature_tensor)
 
     def _model_fn(
             self,
-            feature_tensor: tf.Tensor,
-        ):
+            feature_tensor: tf.Tensor):
 
         with tf.variable_scope(self.SCOPE):
 
@@ -34,18 +33,19 @@ class ClassifierModel:
                 keep_prob = 0.5
 
             hidden = [512]
-            
+
             # NOTE (bcovas) Sanity check.
             # I fell for this one already.
             net = feature_tensor
-            for n in hidden:
+            for units in hidden:
                 net = tf.nn.dropout(net, keep_prob)
-                net = tf.layers.dense(net, n, tf.nn.relu)
+                net = tf.layers.dense(net, units, tf.nn.relu)
 
             net = tf.nn.dropout(net, keep_prob)
             net = tf.layers.dense(net, len(common.PROTEIN_LABEL.keys()), None)
 
         return net
+
 
 class MobileNetV2:
 
@@ -113,6 +113,7 @@ class ProteinEstimator(tf.estimator.Estimator):
             model_fn=_model_fn,
             model_dir=model_dir,
             config=config)
+
 
 def estimator_model_fn(
         features,
@@ -192,14 +193,16 @@ def estimator_model_fn(
 
     if training:
 
-        for i, c in enumerate(["R", "G", "B", "Y"]):
-            tf.summary.image(f"ExampleImage/{c}", img_tensor[:1, :, :, i:i+1], 1)
+        for i, c in enumerate(["Red", "Green", "Blue", "Yellow"]):
+            tf.summary.image(
+                f"ExampleImage/{c}", img_tensor[:1, :, :, i:i+1], 1)
+
         tf.summary.scalar("Correct", correct)
         tf.summary.scalar("FN", FN)
         tf.summary.scalar("FP", FP)
 
         if warm_start_dir:
-            
+
             logger.info("warm starting from %s", warm_start_dir)
 
             assignment_map = {}
@@ -217,12 +220,14 @@ def estimator_model_fn(
             )
 
         optimizer: tf.train.Optimizer = tf_optimizer(learning_rate)
-        optimizer_op = optimizer.minimize(total_loss, tf.train.get_global_step())
+        optimizer_op = optimizer.minimize(
+            total_loss, tf.train.get_global_step())
 
         return tf.estimator.EstimatorSpec(mode,
-            predictions=predictions,
-            loss=total_loss,
-            train_op=optimizer_op)
+                                          predictions=predictions,
+                                          loss=total_loss,
+                                          train_op=optimizer_op)
+
 
 def focal_loss(predictions, labels, gamma=2.):
     """
@@ -232,7 +237,8 @@ def focal_loss(predictions, labels, gamma=2.):
 
     max_val = tf.maximum(-predictions, 0)
     loss = predictions - predictions * labels + max_val + \
-        tf.math.log(tf.math.exp(-max_val) + tf.math.exp(-predictions - max_val))
+        tf.math.log(tf.math.exp(-max_val) +
+                    tf.math.exp(-predictions - max_val))
 
     invprops = tf.log_sigmoid(-predictions * (labels * 2 - 1))
     loss = tf.math.exp(invprops * gamma) * loss
